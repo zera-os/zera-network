@@ -1,0 +1,404 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+import "txn.proto";
+
+package zera_validator;
+
+option optimize_for = SPEED;
+
+service ValidatorService{
+    //streams
+    rpc StreamFailedBlock(stream DataChunk) returns (google.protobuf.Empty);
+    rpc StreamBroadcast(stream DataChunk) returns (google.protobuf.Empty);
+    rpc SyncBlockchain(BlockSync) returns (stream DataChunk);
+    rpc StreamGossip(stream DataChunk) returns (google.protobuf.Empty);
+
+    rpc Broadcast(Block) returns (google.protobuf.Empty);
+    rpc ValidatorRegistration(zera_txn.ValidatorRegistration) returns (google.protobuf.Empty);
+    rpc SyncValidatorList(ValidatorSyncRequest) returns (ValidatorSync);
+    rpc ValidatorMint(zera_txn.MintTXN) returns (google.protobuf.Empty);
+    rpc ValidatorItemMint(zera_txn.ItemizedMintTXN) returns (google.protobuf.Empty);
+    rpc ValidatorContract(zera_txn.InstrumentContract) returns (google.protobuf.Empty); 
+    rpc ValidatorGovernProposal(zera_txn.GovernanceProposal) returns (google.protobuf.Empty);
+    rpc ValidatorGovernVote(zera_txn.GovernanceVote) returns (google.protobuf.Empty);
+    rpc ValidatorSmartContract(zera_txn.SmartContractTXN) returns (google.protobuf.Empty);
+    rpc ValidatorSmartContractInstantiate(zera_txn.SmartContractInstantiateTXN) returns (google.protobuf.Empty);
+    rpc ValidatorSmartContractExecute(zera_txn.SmartContractExecuteTXN) returns (google.protobuf.Empty);
+    rpc ValidatorExpenseRatio(zera_txn.ExpenseRatioTXN) returns (google.protobuf.Empty);
+    rpc ValidatorNFT(zera_txn.NFTTXN) returns (google.protobuf.Empty);
+    rpc ValidatorContractUpdate(zera_txn.ContractUpdateTXN) returns (google.protobuf.Empty);
+    rpc ValidatorHeartbeat(zera_txn.ValidatorHeartbeat) returns (google.protobuf.Empty);
+    rpc ValidatorDelegatedVoting(zera_txn.DelegatedTXN) returns (google.protobuf.Empty);
+    rpc IndexerVoting(IndexerVotingRequest) returns (IndexerVotingResponse);
+    rpc ValidatorQuash(zera_txn.QuashTXN) returns (google.protobuf.Empty);
+    rpc ValidatorFastQuorum(zera_txn.FastQuorumTXN) returns (google.protobuf.Empty);
+    rpc ValidatorRevoke(zera_txn.RevokeTXN) returns (google.protobuf.Empty);
+    rpc ValidatorCompliance(zera_txn.ComplianceTXN) returns (google.protobuf.Empty);
+    rpc ValidatorBurnSBT(zera_txn.BurnSBTTXN) returns (google.protobuf.Empty);
+    rpc Nonce(NonceRequest) returns (NonceResponse);
+    rpc ValidatorCoin(zera_txn.CoinTXN) returns (google.protobuf.Empty);
+    rpc StreamBlockAttestation(stream DataChunk) returns (stream DataChunk);
+    rpc StreamRequestSlashed(stream SlashedRequest) returns (stream DataChunk);
+    rpc Balance(BalanceRequest) returns (BalanceResponse);
+    rpc Gossip(TXNGossip) returns (google.protobuf.Empty);
+    rpc ValidatorAllowance(zera_txn.AllowanceTXN) returns (google.protobuf.Empty);
+}
+
+message AllowanceState{
+    optional string allowed_currency_equivalent = 1; //1000000000000000000 = $1.00 can only have either this or allowed_amount
+    optional string allowed_amount = 2;              //Amount of parts of token can only have either this or allowed_currency_equivalent
+    optional uint32 period_months = 3;               //How many months until this allowance resets, can only have this or period_seconds
+    optional uint32 period_seconds = 4;              //How many seconds until this allowance resets, can only have this or period_months
+    google.protobuf.Timestamp period_end = 5;        //When the allowance period ends, and will reset
+    google.protobuf.Timestamp start_time = 6;        //the very first time a allowance period started
+    string used_amount = 9;                          //Amount of the allowance that has been used
+    zera_txn.PublicKey public_key = 10;              //Public key of the wallet that this allowance is for
+}
+message StakeMultipliers
+{
+    map<string, string> contract_multipliers = 1; //key = contract_id, value = multiplier (multiplier 100 000 = 100%)
+    string default_multiplier = 2;                //default multiplier for all contracts based off of % of zera staked
+}
+
+//Key = Block Height
+message ValidatorArchive
+{
+    map<string, ValidatorBalance> validators = 1; //Key = gen public key
+    string total_balance = 2;                     //Total Balance of all validators
+}
+message ValidatorBalance
+{
+    zera_txn.PublicKey public_key = 1;            //Original Public Key
+    string total_balance = 2;                     //Total Balance of all qualified coins
+}
+message BlockAttestationResponse
+{
+    bool support = 1;                                //hash of block to support
+    bool no_preference = 2;                          //if validator has no preference
+    optional Block supported_block = 3;              //block that they support if they dont agree
+    repeated ValidatorSupport validator_support = 4; //all validators that support either new block or same block
+    zera_txn.PublicKey public_key = 5;               //public key of validator in favour
+    bytes signature = 6;                             //signature of this transaction
+    bool confirmed = 7;                              //if the block has been confirmed
+}
+message BlockAttestation{
+    bytes block_hash = 1;                            //hash of block to support
+    uint32 block_height = 2;                         //height of block to support
+    bytes previous_block_hash = 3;                   //hash of previous block
+    repeated ValidatorSupport validator_support = 4; //all validators that support block
+    zera_txn.PublicKey public_key = 5;               //public key of validator in favour
+    bytes signature = 6;                             //signature of this transaction
+    bool confirmed = 7;                              //if the block has been confirmed
+}
+
+//Key = Block Height
+message AttestationLedger{
+    map<string, AttestationSupport> block_attestation_responses = 1; //all of the attestation responses for a block recieved from other validators key = block hash
+    map<string, string> validator_support = 2;                       //shows how much support that block has key = block hash
+}
+
+message AttestationSupport
+{
+    repeated ValidatorSupport validator_support = 1; //all validators that support block
+    optional Block supported_block = 2;              //block that they support if they dont agree
+
+}
+message ValidatorSupport{
+    zera_txn.PublicKey public_key = 1;       //public key of validator in favour
+    bytes signature = 2;                     //signature of block_hash
+    google.protobuf.Timestamp timestamp = 3; //timestamp of support
+}
+message NonceRequest{
+    bytes wallet_address = 1;
+}
+
+message NonceResponse{
+    uint64 nonce = 1;
+}
+
+message DataChunk{
+    bytes chunk_data = 1;
+    int32 chunk_number = 2;
+    optional int32 total_chunks = 3;
+}
+message ValidatorSyncRequest {
+    zera_txn.PublicKey public_key = 1; 
+    bytes signature = 2;
+}
+message ValidatorSync{
+    repeated zera_txn.Validator validators = 1;
+    optional bytes signature = 2;
+    zera_txn.PublicKey public_key = 3; 
+}
+
+message BlockSync{
+    bytes last_key = 1;
+    uint64 amount = 2;
+    optional bytes signature = 3;
+    zera_txn.PublicKey public_key = 4; 
+}
+message BlockHeader{
+	optional uint64 version = 1;
+	optional bytes previous_block_hash = 2;
+    optional bytes hash = 3;
+	google.protobuf.Timestamp timestamp = 4;
+	uint64 nonce = 5;
+	uint64 block_height = 6;
+    bytes fee_address = 7;
+    optional bytes signature = 8;
+    optional bytes merkle_root = 9;
+    zera_txn.PublicKey public_key = 10; 
+}
+message Block{
+	optional BlockHeader block_header = 1;
+	zera_txn.TXNS transactions = 2;
+	optional bytes signature = 4;
+    zera_txn.PublicKey public_key = 5; 
+    repeated SlashedValidator slashed_validators = 6;
+}
+message SlashedValidator
+{
+    zera_txn.PublicKey public_key = 1;
+    bytes slashed_block_hash = 2;
+    repeated SlashedToken slashed_tokens = 3;
+}
+message SlashedRequest
+{
+    bytes slashed_block_hash = 1;
+}
+message SlashedToken
+{
+    string contract_id = 1;
+    string amount = 2;
+}
+message BlockBatch{
+    repeated Block blocks = 1;
+    bool last_block = 2;
+    optional bytes signature = 3;
+    zera_txn.PublicKey public_key = 4; 
+}
+
+message NFT{
+    bytes holder_address = 1;
+    string contract_id = 2;
+    string item_id = 3;
+    optional string voting_weight = 4;
+    optional zera_txn.ItemContractFees contract_fees = 5;
+}
+
+message Item{
+    string contract_id = 1;
+    string item_id = 2;
+}
+message WalletItems{
+    repeated Item items = 1;
+}
+message ProcessLedger{
+    repeated bytes cycle_contract_ids = 1; //all contracts that need proposals processed
+    repeated bytes proposal_ids = 2;       //all staggered proposals that need to be processed
+}
+//message for a ledger to determine proposal_ids for contracts
+//used to process cycle/staged governance
+// Key = contract_id
+message ProposalLedger{
+    repeated bytes proposal_ids = 1;                //proposals that need to be processed at the end of this cycle
+    repeated bytes pending_proposal_ids = 2;        //proposals that need to be put into the next cycle
+    repeated bytes process_proposal_ids = 3;        //not sure yet
+    uint32 stage = 4;                               //what stage we are currently on
+    google.protobuf.Timestamp cycle_end_date = 5;   //the date the cycle will end at
+    google.protobuf.Timestamp cycle_start_date = 6; //the date the cycle will start at
+    google.protobuf.Timestamp stage_end_date = 7;   //the date the stage will end at
+    google.protobuf.Timestamp stage_start_date = 8; //the date the stage will start at
+    bool break = 9;
+}
+message Vote{
+    map<string, string> vote = 1;
+}
+message Voter{
+    optional bool support = 1;
+    optional uint32 option = 2;
+    bool delegated = 3;
+    optional uint64 stage = 4;
+}
+
+//which proposals have been voted on with this wallet.
+message VoteWallet{
+    map<string, Voter> proposal_votes = 1;
+}
+message Proposal{
+    string contract_id = 1;
+    map<string, string> yes = 4;    //all votes for yes of each currency
+    map<string, string> no = 5;     //all votes for no of each currency
+    map<uint32, Vote> options = 6; //all votes for each option of each currency
+    uint32 stage = 7;
+    string fee = 8;
+    string fee_id = 9;
+    bytes wallet = 10;
+    map<string, Voter> voters = 11; //wallets and amounts of each currency wallet has
+    optional google.protobuf.Timestamp start_date = 12;
+    optional google.protobuf.Timestamp end_date = 13;
+    zera_txn.PublicKey public_key = 14; 
+    bool options_set = 15;
+    uint32 number_of_options = 16;
+    repeated zera_txn.GovernanceTXN governance_txn = 17;
+}
+message ProposalWalletRecieve{
+    zera_txn.BaseTXN base = 1;
+    bytes wallet_adr = 2;
+    string contract_id = 3;
+    string amount = 4;
+}
+
+message ProposalWalletSend{
+    zera_txn.BaseTXN base = 1;
+    bytes wallet_adr = 2;
+    string contract_id = 3;
+    repeated bytes recipient_wallet = 4;
+    repeated string amounts = 5;
+}
+message CurrencyRate{
+    bool qualified = 1;
+    string rate = 2; //1000000000000000000 = $1.00
+    optional string max_stake = 3; //1000000000000000000 = $1.00
+}
+message ExpenseTracker{
+    int32 day = 1;
+    int32 month = 2;
+}
+message IndexerVotingRequest{
+    bytes proposal_id = 1;
+}
+
+//THIS IS NOT A PART OF ACTUAL VALIDATOR
+message IndexerOption{
+    repeated IndexerVote votes = 1;
+    uint32 index = 2;
+}
+message IndexerVote{
+    string contract_id = 1;
+    string amount = 2;
+}
+message IndexerVotingResponse{
+    repeated IndexerVote support = 1;    //all votes for yes of each currency
+    repeated IndexerVote against = 2;     //all votes for no of each currency
+    repeated IndexerOption options = 3;  //all votes for each option of each currency
+    uint32 stage = 4;
+}
+message DelegationFees{
+    map<string, string> authorized_fees =3;
+}
+message AuthorizedFee{
+    uint32 priority = 1;
+    string authorized_amount = 2;
+}
+
+message Delegator{
+    zera_txn.PublicKey public_key = 1; 
+    uint32 priority = 2;
+}
+
+message DelegatedFees{
+    repeated string contract_ids = 1;  
+}
+
+message Delegators{
+    repeated Delegator delegator = 1; 
+}
+
+
+//databaase db_delegate_recipient key = contract_id, value = DelegatedRecipient 
+message DelegatedRecipient{ 
+    map<string, Delegators> delegations = 1; //key = contract_id, value = Delegator
+}
+
+//database db_voted_proposals key = public_key, value = VotedProposals
+message Delegated{
+    map<string, uint32> proposals = 1; //key = proposal_id encoded, value = priority
+}
+message DelegateeWallets{
+    repeated bytes wallet_adr = 1;
+}
+//database db_delegatees key = public_key, value = Delegatees
+message Delegatees{
+    map<string, DelegateeWallets> delegated_wallets = 1; //key = contract_id, value = DelegateeWallets
+}
+message DelegateWallets{
+    repeated bytes wallets = 1;
+}
+message QuashLedger{
+    repeated bytes txn_ids = 1;
+}
+//key = proposal_id
+message QuashLookup{
+    repeated zera_txn.PublicKey quash_keys = 1; //keys that have already sumbitted quash 
+    uint32 keys_required = 2;       //how many keys needed to fullfill quash
+}
+message ComplianceData
+{
+    uint32 level = 1;
+    google.protobuf.Timestamp expiry = 2;
+}
+message ComplianceLevels{
+    repeated ComplianceData levels = 1;
+}
+//Key = wallet_address
+message WalletLookup{
+    map<string, ComplianceLevels> compliance = 1;    //compliance level of wallet of each contract
+}
+//the dates the next cycle will end at.
+message ProposalProcess{
+    zera_txn.GOVERNANCE_TYPE type = 1;
+    uint32 stage = 2;
+    uint32 total_stages = 3;
+    google.protobuf.Timestamp end_date = 4;
+    google.protobuf.Timestamp start_date = 5;
+
+}
+message TXNTracker{
+    repeated bytes txn_ids = 1;
+}
+//key = wallet_address + contract_id
+message PreProcessedWallets
+{
+    string amount = 1;
+    
+}
+message ZeraGovernanceAuth{
+    zera_txn.PublicKey public_key = 1;
+    zera_txn.TRANSACTION_TYPE type = 2;
+}
+
+message ContractPrice{
+    string symbol = 1;
+    uint32 number_of_symbols = 2;
+    string multiplier = 3;
+}
+
+message BalanceTracker{
+    map<string, string> wallet_balances = 1; // Key: wallet address, Value: balance as string
+    // repeated bytes wallet_addresses = 1;
+    // repeated string balances = 2;
+}
+message TokenLookup{
+    repeated string tokens = 1;
+}
+message BalanceRequest{
+    bytes wallet_address = 1;
+    string contract_id = 2;
+    bool encoded = 3;
+}
+message BalanceResponse{
+    string balance = 1;
+}
+
+message TXN{
+    zera_txn.TRANSACTION_TYPE txn_type = 1;
+    bytes serialized_txn = 2;
+}
+message TXNGossip{
+    repeated TXN txns = 1;
+    zera_txn.PublicKey public_key = 2;
+    optional bytes signature = 3;
+}

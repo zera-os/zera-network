@@ -1,0 +1,261 @@
+syntax = "proto3";
+
+import "google/protobuf/empty.proto";
+import "google/protobuf/timestamp.proto";
+import "txn.proto";
+import "validator.proto";
+
+package zera_api;
+
+option optimize_for = SPEED;
+
+service APIService{
+    rpc Balance(BalanceRequest) returns (BalanceResponse);
+    rpc Nonce(NonceRequest) returns (NonceResponse);
+    rpc ContractFee(ContractFeeRequest) returns (ContractFeeResponse);
+    rpc BaseFee(BaseFeeRequest) returns (BaseFeeResponse);
+    rpc GetTokenFeeInfo(TokenFeeInfoRequest) returns (TokenFeeInfoResponse);
+    rpc Items(ItemRequest) returns (ItemResponse);
+    rpc Denomination(DenominationRequest) returns (DenominationResponse);
+    rpc Database(DatabaseRequest) returns (DatabaseResponse);
+    rpc Block(BlockRequest) returns (BlockResponse);
+    rpc ProposalLedger(ProposalLedgerRequest) returns (ProposalLedgerResponse);
+    rpc SmartContractActivityRequest (ActivityRequest) returns (google.protobuf.Empty);
+    rpc SmartContractEvents(SmartContractEventsResponse) returns (google.protobuf.Empty);
+    rpc Contract(ContractRequest) returns (ContractResponse);
+    rpc SmartContractEventsSearch(SmartContractEventsSearchRequest) returns (SmartContractEventsSearchResponse);
+}
+
+enum CONFIRMATION_LEVEL{
+    PROCESSED = 0;
+    FINALIZED = 1;
+    CONFIRMED = 2;
+}
+
+enum DATABASE_TYPE{
+    UNKNOWN = 0;
+    CONTRACTS = 1;
+    HASH_INDEX = 2;
+    CONTRACT_SUPPLY = 3;
+    SMART_CONTRACTS = 4;
+    VALIDATORS = 5;
+    BLOCKS = 6;
+    HEADERS = 7;
+    TRANSACTIONS = 8;
+    CONTRACT_ITEMS = 9;
+    VALIDATOR_UNBONDING = 10;
+    PROPOSAL_LEDGER = 11;
+    PROPOSALS = 12;
+    CURRENCY_EQUIVALENTS = 13;
+    EXPENSE_RATIO = 14;
+    ATTESTATION = 15;
+    CONFIRMED_BLOCKS = 16;
+}
+
+enum PROPOSAL_TYPE{
+    ALL_PROPOSALS = 0;
+    ALL_LEDGERS = 1;
+    PROPOSAL_BY_ID = 2;
+    LEDGER_BY_ID = 3;
+}
+
+//PROPOSAL LEDGER
+message ProposalLedgerRequest{
+    DATABASE_TYPE type = 1;
+    string key = 2; //proposal_id or ledger_id
+}
+message ProposalLedgerResponse{
+    repeated string ledger_keys = 1; //proposal_id or ledger_id
+    repeated string ledger_values = 2; //string of proposal ledger
+    repeated string proposal_keys = 3; //proposal_id or ledger_id
+    repeated string proposal_values = 4; //string of proposal ledger
+    repeated string wallets_keys = 5; //proposal_id or ledger_id
+    repeated string wallets_values = 6;
+    repeated string temp_keys = 7; 
+    repeated string temp_values = 8; 
+    repeated string voted_keys = 9; 
+    repeated string voted_values = 10; 
+}
+//Block
+message BlockRequest{
+    oneof payload{
+    uint64 block_height = 1;
+    string block_hash = 2;
+    }
+    bool encoded = 3;
+}
+
+message BlockResponse{
+    zera_validator.Block block = 1;
+}
+//NONCE
+message NonceRequest{
+    bytes wallet_address = 1;
+    bool encoded = 3;
+}
+
+message NonceResponse{
+    uint64 nonce = 1;
+}
+
+//BALANCE
+message BalanceRequest{
+    bytes wallet_address = 1;
+    string contract_id = 2;
+    bool encoded = 3;
+}
+message BalanceResponse{
+    string balance = 1;
+    string denomination = 2;
+    string rate = 3;            //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
+}
+
+//CONTRACT
+message ContractRequest{
+    string contract_id = 1;
+}
+
+message ContractResponse
+{
+    zera_txn.InstrumentContract contract = 1;
+    google.protobuf.Timestamp timestamp = 2;
+    zera_txn.PublicKey public_key = 3;
+    bytes signature = 4;
+}
+
+//CONTRACT FEE
+message ContractFeeRequest{
+    string contract_id = 1;
+}
+
+message ContractFeeResponse{
+    zera_txn.CONTRACT_FEE_TYPE contract_fee_type = 1; 
+    repeated string allowed_fee_instrument = 2;
+    string fee = 3;
+}
+
+
+//BASE FEE
+message BaseFeeRequest{
+    optional zera_txn.PublicKey public_key = 1;
+    zera_txn.TRANSACTION_TYPE txn_type = 2;
+}
+message BaseFeeResponse{
+    string key_fee = 1;     //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
+    string byte_fee = 2;    //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
+}
+
+
+//AUTHORIZED TOKEN
+message TokenFeeInfo{
+    string contract_id = 1;
+    string rate = 2;        //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
+    bool authorized = 3;
+    string denomination = 4;
+    optional zera_txn.ContractFees contract_fees = 5;
+
+}
+message TokenFeeInfoRequest{
+    repeated string contract_ids = 1;
+}
+message TokenFeeInfoResponse{
+    repeated TokenFeeInfo tokens = 1;
+}
+
+
+//ITEM BALANCE
+message Item{
+    string contract_id = 1;
+    string item_id = 2;
+}
+message ItemRequest{
+    bytes wallet_address = 1;
+    bool encoded = 2;
+}
+
+message ItemResponse{
+    repeated Item items = 1;
+}
+
+//DENOMINATION
+message DenominationRequest{
+    string contract_id = 1;
+}
+
+message DenominationResponse{
+    string denomination = 1;
+}
+
+//DATABASE
+message DatabaseRequest{
+    DATABASE_TYPE type = 1;
+    string key = 2;
+}
+
+message DatabaseResponse{
+    string value = 1;
+}
+
+message ActivityRequest{
+    string smart_contract_id = 1;
+    uint64 instance = 2;
+    CONFIRMATION_LEVEL level = 3;
+    string host = 4;
+    int32 port = 5;
+    bool subscribe = 6; //true = subscribe, false = unsubscribe
+    zera_txn.PublicKey public_key = 7;
+    bytes signature = 8;
+    uint64 nonce = 9;
+}
+message SmartContractEventsResponse{
+    string smart_contract = 1; //
+    uint64 instance = 2; //
+    uint64 gas_used = 3; //
+    uint64 gas_approved = 4; //
+    string storage_fee = 5; //
+    zera_txn.PublicKey caller = 6; //
+    bytes event_data = 7; //
+    string function = 8; //
+    uint64 block_height = 9; //
+    google.protobuf.Timestamp timestamp = 10; // block timestamp
+    string block_hash = 11; //
+    string txn_hash = 12; //in hex string
+    zera_txn.PublicKey public_key = 13; // validator public key
+    bytes signature = 14; // validator signature
+
+}
+
+message SmartContractEventsSearchRequest{
+    string smart_contract_id = 1;
+    google.protobuf.Timestamp search_start = 2;
+}
+
+message SmartContractEventsSearchResponse{
+    repeated SmartContractEventsResponse events = 1;
+    zera_txn.PublicKey public_key = 13; // validator public key
+    bytes signature = 14; // validator signature
+}
+message SmartContractEventManagementTemp{
+    repeated string event_keys = 1;
+    repeated string smart_contract_ids = 2;
+}
+message SmartContractEventManagement{
+    map<string, google.protobuf.Timestamp> events = 1;
+}
+
+message SmartContractSubscription{
+    map<string, Subscriber> subscibers = 1;
+}
+
+message Subscriber{
+    CONFIRMATION_LEVEL level = 1;
+    string host = 2;
+    int32 port = 3;
+}
+
+message WalletChange{
+    bytes wallet_address = 1;
+    repeated string contract_ids = 2;
+    repeated string old_balances = 3;
+    repeated string new_balances = 4;
+}

@@ -1,0 +1,650 @@
+syntax = "proto3";
+
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+package zera_txn;
+
+option optimize_for = SPEED;
+
+service TXNService{
+    rpc Coin(CoinTXN) returns (google.protobuf.Empty);
+    rpc Mint(MintTXN) returns (google.protobuf.Empty);
+    rpc ItemMint(ItemizedMintTXN) returns (google.protobuf.Empty);
+    rpc Contract(InstrumentContract) returns (google.protobuf.Empty); 
+    rpc GovernProposal(GovernanceProposal) returns (google.protobuf.Empty);
+    rpc GovernVote(GovernanceVote) returns (google.protobuf.Empty);
+    rpc SmartContract(SmartContractTXN) returns (google.protobuf.Empty);
+    rpc SmartContractExecute(SmartContractExecuteTXN) returns (google.protobuf.Empty);
+    rpc SmartContractInstantiate(SmartContractInstantiateTXN) returns (google.protobuf.Empty);
+    rpc ExpenseRatio(ExpenseRatioTXN) returns (google.protobuf.Empty); 
+    rpc NFT(NFTTXN) returns (google.protobuf.Empty);
+    rpc ContractUpdate(ContractUpdateTXN) returns (google.protobuf.Empty); 
+    rpc DelegatedVoting(DelegatedTXN) returns (google.protobuf.Empty);
+    rpc Quash(QuashTXN) returns (google.protobuf.Empty);
+    rpc FastQuorum(FastQuorumTXN) returns (google.protobuf.Empty);
+    rpc Revoke(RevokeTXN) returns (google.protobuf.Empty);
+    rpc Compliance(ComplianceTXN) returns (google.protobuf.Empty);
+    rpc BurnSBT(BurnSBTTXN) returns (google.protobuf.Empty);
+    rpc Allowance(AllowanceTXN) returns (google.protobuf.Empty);
+}
+
+enum TXN_STATUS{
+    OK = 0;
+    INVALID_PARAMETERS = 1;
+    INSUFFICIENT_AMOUNT = 2;
+    INSUFFICIENT_CONTRACT_FEES = 3;
+    AUTHORIZED_INSUFFICIENT_FEES = 4;
+    AUTHORIZED_INSUFFICIENT_CONTRACT_FEES = 5;
+    INVALID_CONTRACT = 6;
+    INVALID_AUTH_KEY = 7;
+    INVALID_WALLET_ADDRESS = 8;
+    INVALID_MULTI_TRANSACTION = 9;
+    INVALID_CONTRACT_PARAMETERS = 10;
+    INVALID_CONTRACT_FEE_ID = 11;
+    INVALID_UINT256 = 12;
+    EXCEEDED_MAX_SUPPLY = 13;
+    INVALID_NFT = 14;
+    NFT_OWNERSHIP = 15;
+    VALIDATOR_ADDRESS = 16;
+    CONTRACT_HAS_NO_GOVERNANCE = 17;
+    INVALID_BASE_FEE_ID = 18;
+    EXPENSE_RATIO_DUPLICATE = 19;
+    RESTRICTED_SYMBOL = 20;
+    INVALID_PROPOSAL_ID = 21;
+    PROPOSAL_NOT_IN_VOTING_PERIOD = 22;
+    TIME_DELAY_INITIALIZED = 23;
+    INVALID_TXN_HASH = 24;
+    INVALID_TXN_TYPE = 25;
+    TIME_DELAY_EXPIRED = 26;
+    DUPLICATE_AUTH_KEY = 27;
+    KEY_WEIGHT_TOO_LOW = 28;
+    INVALID_ITEM = 29;
+    INVALID_PROPOSAL = 30;
+    PROPOSAL_DOES_NOT_BELONG_TO_SENDER = 31;
+    INVALID_ADDRESS = 32;
+    NO_CHANGE_TO_COMPLIANCE = 33;
+    COMPLIANCE_CHECK_FAILED = 34;
+    INVALID_SAFE_SEND = 35;
+    INVALID_TXN_DATA = 36;
+    DUPLICATE_SMART_CONTRACT_NONCE =37;
+    INVALID_SMART_CONTRACT = 38;
+    FAULTY_TXN = 39;
+    OUT_OF_GAS = 40;
+    INVALID_ALLOWANCE = 41;
+}
+enum TRANSACTION_TYPE
+{
+    UKNOWN_TYPE = 0;
+    COIN_TYPE = 1;
+    MINT_TYPE = 2;
+    ITEM_MINT_TYPE = 3;
+    CONTRACT_TXN_TYPE = 4;
+    VOTE_TYPE = 5;
+    PROPOSAL_TYPE = 6;
+    SMART_CONTRACT_TYPE = 7;
+    SMART_CONTRACT_EXECUTE_TYPE = 8;
+    EXPENSE_RATIO_TYPE = 9;
+    NFT_TYPE = 10;
+    UPDATE_CONTRACT_TYPE = 11;
+    VALIDATOR_REGISTRATION_TYPE = 12;
+    VALIDATOR_HEARTBEAT_TYPE = 13;
+    PROPOSAL_RESULT_TYPE = 14;
+    DELEGATED_VOTING_TYPE = 15;
+    REVOKE_TYPE = 16;
+    QUASH_TYPE = 17;
+    FAST_QUORUM_TYPE = 18;
+    COMPLIANCE_TYPE = 19;
+    SBT_BURN_TYPE = 20;
+    REQUIRED_VERSION = 21;
+    SMART_CONTRACT_INSTANTIATE_TYPE = 22;
+    ALLOWANCE_TYPE = 23;        //CHANGE - Allowance transaction type
+}
+//ENUMS
+enum LANGUAGE{
+    COMPILED = 0;
+    PYTHON = 1;
+    JAVASCRIPT = 2;
+}
+
+enum PROPOSAL_PERIOD{
+    DAYS = 0;
+    MONTHS = 1;
+}
+
+enum VARIABLE_TYPE{
+    INT = 0;
+    SHORT = 1;
+    LONG = 2;
+    LONG_LONG = 3;
+    BOOL = 4;
+    STRING = 5;
+}
+//SUB MESSAGES
+enum CONTRACT_FEE_TYPE{
+    FIXED = 0;
+    CUR_EQUIVALENT = 1;
+    PERCENTAGE = 2;
+    NONE = 3; //CHANGE - No fees for this contract
+}
+enum GOVERNANCE_TYPE{
+    STAGED = 0;    //Multiple stages of governance, must pass regular quorum to get to next stage. Up to 99 stages specified by contract creator (in days)
+    CYCLE = 1;     //1 specified voting stage based on days repeat this process once the cycle is complete (in days)
+    STAGGERED = 2; //Every proposal has the same voting period length and starts when proposal is made (in days)
+    ADAPTIVE = 3;  //Every proposal has its own specified voting period (in days)
+    REMOVE = 4;    //CHANGE - Remove governance from contract
+}
+enum CONTRACT_TYPE{
+    TOKEN = 0;
+    NFT = 1;
+    SBT = 2;
+}
+message DelegateContract{
+    int32 priority= 1;
+    string contract_id = 2;
+}
+message DelegatedTXN{
+    BaseTXN base = 1;
+    repeated DelegateVote delegate_votes = 2;
+    repeated DelegateFees delegate_fees = 3;
+}
+message DelegateVote{
+    bytes address = 1;
+    repeated DelegateContract contracts = 2;
+}
+message DelegateFees{
+    string contract_id = 1;
+    string auth_amount = 2;
+}
+message Compliance{
+    string contract_id = 1;
+    uint32 compliance_level = 2;
+}
+message TokenCompliance{
+    repeated Compliance compliance = 1;
+}
+//trade in for maps
+message ExpenseRatio{
+    uint32 day = 1;
+    uint32 month = 2;
+    uint32 percent = 3; //100,000 = 100%
+}
+message KeyValuePair{
+    string key = 1;
+    string value = 2;
+}
+message ByteMultiplier{
+    TRANSACTION_TYPE txn_type = 1;
+    string multiplier = 2;
+}
+message RevokeTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    bytes recipient_address = 3;
+    string item_id = 4;
+}
+message FastQuorumTXN{
+    BaseTXN base = 1;
+    bytes proposal_id = 2;
+}
+message Governance{
+    GOVERNANCE_TYPE type = 1;              //read GOVERNANCE_TYPE above
+    uint32 regular_quorum = 2;             //percent of yes votes to pass at the end of cycle (still needs to pass threshhold) 10000 = 100&
+    optional uint32 fast_quorum = 3;       //Percent of yes votes to instantly pass (% based off circulating supply) 10000 = 100%
+    repeated string voting_instrument = 4; //which voting instruments are allowed to vote in this contract - this does effect fast_quorum and threshold
+    uint32 threshold = 5;                  //threshold of participation of holders needed to be accepted 1000 = 100%
+    optional bool chicken_dinner = 6;      //Option winner does not need to pass regular quorum.
+    bool allow_multi = 7;                  //Allow multiple choice proposals.
+    optional uint32 voting_period = 8;     //How many days in the voting period (Months | Days). (cannot be present with adaptive) | (must be present with cycle & staggered & staged)
+    repeated string allowed_proposal_instrument = 9;    
+    optional PROPOSAL_PERIOD proposal_period = 10;  //Is the total_period in months or days? months will start the cycle on the start_date, days will start after period ends (must be present with cycle & staggered & staged) | (cannot be present with adaptive) 
+    repeated Stage stage_length = 11;              //Determines how many stages in cycle, cannot be more than 28 per month and 99 in total. '0' input will represent remainder of month (can only be used as last entry)
+    optional google.protobuf.Timestamp start_timestamp = 12; //Start date of the contract, year-month-day-hour parsed. Needs to be present for staged and cycle
+    optional uint32 max_approved = 13;                  //only allowed in CYCLE governance type, this is the max number of proposals that can be approved in a cycle (if 0, all proposals will be approved)
+}
+message Stage{
+    uint32 length = 1;
+    PROPOSAL_PERIOD period = 2;
+    bool break = 3;
+    uint32 max_approved = 4;
+}
+message CoinDenomination{
+    string denomination_name = 5;
+    string amount = 6;
+}
+message ContractFees{
+    string fee = 1;                 //100% && $1.00 = 1,000,000,000,000,000,000 (quintillion)
+    optional bytes fee_address = 2; //address of contract holder (or the wallet they want fees to go to)
+    string burn = 3;                //percent = 100% = 1000000000000000000 (quintillion)
+    string validator = 4;           //percent = 100% = 1000000000000000000 (quintillion)
+    repeated string allowed_fee_instrument = 5; //contract_ids that can be used to pay fees
+    CONTRACT_FEE_TYPE contract_fee_type = 6;    //read CONTRACT_FEE_TYPE above
+}
+message ItemContractFees{
+    string fee = 1;                  //$1.00 = 1000000000000000000 (quintillion)
+    optional bytes fee_address = 2;
+    string burn = 3;
+    string validator = 4;
+    repeated string allowed_fee_instrument = 5;
+}
+message RestrictedKey{
+    PublicKey public_key = 1;
+    int64 time_delay = 2;
+    bool global = 3;
+    bool update_contract = 4;
+    bool transfer = 5;
+    bool quash = 6;
+    bool mint = 7;
+    bool vote = 8;
+    bool propose = 9;
+    bool compliance = 10;
+    bool expense_ratio = 11;
+    bool revoke = 12;
+    uint32 key_weight = 13;
+}
+message ExpenseRatioTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    repeated bytes addresses = 3;
+    bytes output_address = 4;
+}
+message PreMintWallet{
+    bytes address = 1;
+    string amount = 2;
+}
+message Transfer{
+    bytes recipient_address = 1;
+    string amount = 2;
+    string contract_id = 3;
+    optional string contract_fee_amount = 4;
+    optional string contract_fee_id = 5;
+    string base_fee_amount = 6;
+    string base_fee_id = 7;
+    optional string memo = 8;
+}
+message BurnSBTTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    string item_id = 3;
+}
+message BaseTXN{
+    PublicKey public_key = 1;
+    google.protobuf.Timestamp timestamp = 3; 
+    string fee_amount = 4;
+    string fee_id = 5;
+    optional bytes signature = 6;
+    optional bytes hash = 7;
+    optional string memo = 8;
+    optional bool safe_send = 9;
+    uint64 nonce = 10;
+    optional string interface_fee = 11;
+    optional string interface_fee_id = 12;
+    optional bytes interface_address = 13;
+}
+message PublicKey{
+    bytes single = 1;
+    MultiKey multi = 2;
+    optional bytes smart_contract_auth = 3;
+    optional bytes governance_auth = 4;  //
+}
+message GovernanceAuth
+{
+    bytes auth = 1;
+    bytes proposal_id = 2;
+}
+message MultiKey{
+    repeated bytes public_keys = 1;             //public keys with class prefix ex. c1_"public_key"
+    repeated bytes signatures = 2;              //signature of each public key included "empty space if not included"
+    repeated MultiPatterns multi_patterns = 3;  //all diiferent patterns of to verify the multi key
+    repeated string hash_tokens = 4;            //hash tokens to hash the multi key in wallet address
+}
+message MultiPatterns{
+    repeated uint32 class = 1;                   //these are a parrellel array of classes and how many of these classes are required to create a valid multi key
+    repeated uint32 required = 2;
+}
+message ExpenseRatioResult{
+    string contract_id = 1;
+    repeated Wallets wallets = 2;
+    bytes hash = 3;
+    bytes recipient_address = 4;
+}
+message ComplianceAssign
+{
+    bytes recipient_address = 1;    //address of the wallet to assign compliance
+    uint32 compliance_level = 2;    //compliance level to assign
+    bool assign_revoke = 3;         //true to assign compliance, false to revoke
+    google.protobuf.Timestamp expiry = 4;
+}
+message ComplianceTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;         //contract_id of the contract to assign compliance
+    repeated ComplianceAssign compliance = 3;
+}
+message Wallets{
+    bytes address = 1;
+    string amount = 2;
+}
+message QuashTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    bytes txn_hash = 3;
+}
+message QuashResult
+{
+    bytes txn_hash = 1;
+    repeated PublicKey public_keys = 2;
+}
+message CoinTXN
+{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    TransferAuthentication auth = 3;
+    repeated InputTransfers input_transfers = 4;
+    repeated OutputTransfers output_transfers = 5;
+    optional string contract_fee_id = 6;
+    optional string contract_fee_amount = 7;
+}
+message TransferAuthentication
+{
+    repeated PublicKey public_key = 1;
+    repeated bytes signature = 2;
+    repeated uint64 nonce = 3;
+    repeated bytes allowance_address = 4;
+    repeated uint64 allowance_nonce = 5;
+}
+message InputTransfers
+{
+    uint64 index = 1;
+    string amount = 2;
+    uint32 fee_percent = 3;                     // 100 000 000 = 100%
+    optional uint32 contract_fee_percent = 4;   // 100 000 000 = 100%
+}
+message OutputTransfers
+{
+    bytes wallet_address = 1;
+    string amount = 2;
+    optional string memo = 3;
+}
+message MintTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    string amount = 3;
+    bytes recipient_address = 4;
+} 
+message NFTTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    string item_id = 3;
+    bytes recipient_address = 4; 
+    optional string contract_fee_amount = 5;
+    optional string contract_fee_id = 6;
+}
+message ItemizedMintTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    string item_id = 3;
+    bytes recipient_address = 4; 
+    optional string voting_weight = 5;
+    repeated KeyValuePair parameters = 6; 
+    optional uint64 expiry = 7; 
+    optional ItemContractFees contract_fees = 8; //contract fees for specific item
+    optional uint64 valid_from = 9;
+}
+message ContractUpdateTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    uint64 contract_version = 3;
+    optional string name = 4;
+    optional Governance governance = 5;
+    repeated RestrictedKey restricted_keys = 6;
+    optional ContractFees contract_fees = 7;
+    repeated KeyValuePair custom_parameters = 8; 
+    repeated ExpenseRatio expense_ratio = 9;
+    repeated TokenCompliance token_compliance = 10; //Compliance levels for kyc compliance
+    optional bool kyc_status = 11;            //if true, this contract will require kyc to transact
+    optional bool immutable_kyc_status = 12;  //if kyc_status is true, this will make it immutable
+    optional uint32 quash_threshold = 13;     
+}
+message InstrumentContract{
+    BaseTXN base = 1; 
+    uint64 contract_version = 2;
+    string symbol = 3; 
+    string name = 4;
+    optional Governance governance = 5;
+    repeated RestrictedKey restricted_keys = 6;
+    optional string max_supply = 7;
+    optional ContractFees contract_fees = 8;
+    repeated PreMintWallet premint_wallets = 9;
+    optional CoinDenomination coin_denomination = 10;
+    repeated KeyValuePair custom_parameters = 11; 
+    string contract_id = 12; 
+    repeated ExpenseRatio expense_ratio = 13;
+    CONTRACT_TYPE type = 14;
+    bool update_contract_fees = 15;
+    bool update_expense_ratio = 16;
+    optional uint32 quash_threshold = 17;           //total number of quash txns to quash a time delay txn
+    repeated TokenCompliance token_compliance = 18; //Compliance levels for each token that are manditory to transact with this contract
+    bool kyc_status = 19;                           //if true, this contract will require kyc to transact
+    bool immutable_kyc_status = 20;                 //if kyc_status is true, this will make it immutable
+    repeated MaxSupplyRelease max_supply_release = 21;
+}
+message MaxSupplyRelease{
+    google.protobuf.Timestamp release_date = 1;
+    string amount = 2;
+}
+message GovernanceVote{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    bytes proposal_id = 3;
+    optional bool support = 4;
+    optional uint32 support_option = 5;
+}
+message GovernanceProposal{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    string title = 3;
+    string synopsis = 4;
+    string body = 5;
+    repeated string options = 6;
+    optional google.protobuf.Timestamp start_timestamp = 7;
+    optional google.protobuf.Timestamp end_timestamp = 8;
+    repeated GovernanceTXN governance_txn = 9;
+}
+message GovernanceTXN{
+    TRANSACTION_TYPE txn_type = 1;
+    bytes serialized_txn = 2;
+    bytes txn_hash = 3;
+}
+message SmartContractTXN{
+    BaseTXN base = 1;
+    string smart_contract_name = 4;
+    bytes binary_code = 2;
+    bytes source_code = 7;
+    LANGUAGE language = 3;
+    repeated string functions = 5;
+    //repeated string dependencies = 6;
+}
+message Parameters
+{
+    bytes value = 1;
+    string type = 2;
+}
+message SmartContractExecuteTXN{
+    BaseTXN base = 1;
+    string smart_contract_name = 2;
+    uint32 instance = 3;
+    string function = 4;
+    repeated Parameters parameters = 5;
+}
+message SmartContractInstantiateTXN{
+    BaseTXN base = 1;
+    string smart_contract_name = 2;
+    uint32 instance = 3;
+    repeated Parameters parameters = 4;
+}
+//key = generated public key
+message Validator{
+    PublicKey public_key = 1;  //original public key
+    string host = 2;
+    string client_port = 3; 
+    string validator_port = 4; 
+    repeated string staked_contract_ids = 5;
+    uint64 benchmark = 6;
+    google.protobuf.Timestamp timestamp = 7;
+    bool lite = 8;
+    bool online = 9;
+    uint32 version = 10;
+    uint64 last_heartbeat = 11;
+}
+message ValidatorRegistration{
+    BaseTXN base = 1;
+    Validator validator = 2;
+    bool register = 3;
+    PublicKey generated_public_key = 4;
+    bytes generated_signature = 5;      //signature of the generated public key (signing txn hash)
+}
+message ValidatorHeartbeat{
+    BaseTXN base = 1;
+    bool online = 2;
+    uint32 version = 3;
+}
+message SmartContractParameter{
+    uint32 index = 1;
+    VARIABLE_TYPE type = 2;
+    optional string value = 3;
+}
+message Votes{
+    repeated VotePair votes = 1;
+}
+message VotePair{
+    string contract_id = 1;
+    string amount = 2;
+}
+message RequiredVersion{
+    BaseTXN base = 1;
+    repeated uint32 version = 2;
+}
+message ProposalResult{
+    BaseTXN base = 1;
+    string contract_id = 2;     //contract_id of the proposal
+    bytes proposal_id = 3;      //proposal_id of the proposal
+    optional string support_cur_equiv = 4; //cur_equiv of all the support votes (multiple contract_ids)
+    optional string against_cur_equiv = 5; //cur_equiv of all the against votes (multiple contract_ids)
+    repeated string option_cur_equiv = 6;  //cur_equiv of all the option votes (multiple contract_ids)
+    optional Votes support_votes = 7;   //raw support votes of each contract_id
+    optional Votes against_votes = 8;   //raw against votes of each contract_id
+    repeated Votes option_votes = 9;    //raw option votes of each contract_id
+    bool passed = 10;
+    bool final_stage = 11;
+    uint32 stage = 12;
+    bool fast_quorum = 13;
+    optional bool proposal_cut = 14;      //CHANGE - if staged and proposal is accepted to next stage (top x yes votes / and passing)
+}
+message AllowanceTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;                          //contract id of the token to allow
+    bytes wallet_address = 3;                        //address of the wallet to allow
+    optional string allowed_currency_equivalent = 4; //1000000000000000000 = $1.00 can only have either this or allowed_amount
+    optional string allowed_amount = 5;              //Amount of parts of token can only have either this or allowed_currency_equivalent
+    optional uint32 period_months = 6;               //How many months until this allowance resets, can only have this or period_seconds
+    optional uint32 period_seconds = 7;              //How many seconds until this allowance resets, can only have this or period_months
+    google.protobuf.Timestamp start_time = 9;        //Start time of the allowance.
+    bool authorize = 10;                             //true to authorize, false to de-authorize
+}
+message TXNS{
+    repeated CoinTXN coin_txns = 1;
+    repeated MintTXN mint_txns = 2;
+    repeated ItemizedMintTXN item_mint_txns = 3;
+    repeated InstrumentContract contract_txns = 4;
+    repeated GovernanceVote governance_votes = 5;
+    repeated GovernanceProposal governance_proposals = 6;
+    repeated SmartContractTXN smart_contracts = 7;
+    repeated SmartContractExecuteTXN smart_contract_executes = 8;
+    repeated ExpenseRatioTXN expense_ratios = 9;
+    repeated TXNStatusFees txn_fees_and_status = 10;
+    repeated TokenFees token_fees = 11;
+    repeated NFTTXN nft_txns = 12;
+    repeated ContractUpdateTXN contract_update_txns = 13;
+    repeated ValidatorRegistration validator_registration_txns = 14;
+    repeated ValidatorHeartbeat validator_heartbeat_txns = 15;
+    repeated ProposalResult proposal_result_txns = 16; //
+    repeated ExpenseRatioResult expense_ratio_result_txns = 17;
+    repeated DelegatedTXN delegated_voting_txns = 18;
+    repeated QuashTXN quash_txns = 19;
+    repeated FastQuorumTXN fast_quorum_txns = 20;
+    repeated QuashResult quash_results = 21;
+    repeated RevokeTXN revoke_txns = 22;
+    repeated ComplianceTXN compliance_txns = 23;
+    repeated BurnSBTTXN burn_sbt_txns = 24;
+    repeated SmartContractInstantiateTXN smart_contract_instantiate_txns = 25;
+    optional RequiredVersion required_version_txn = 26;
+    repeated AllowanceTXN allowance_txns = 27;
+}
+
+message Token{
+    string contract_id = 1;
+    string amount = 2;
+}
+message TokenFees{
+    bytes address = 1;
+    repeated Token tokens = 2;
+}
+message DelegatedData{
+    bytes address = 1;
+    Token fee = 2;
+}
+message TXNStatusFees{
+    bytes txn_hash = 1;
+    TXN_STATUS status = 2;
+    string base_fees = 3;
+    string base_contract_id = 4;
+    optional string contract_fees = 5;
+    optional string contract_contract_id = 6;
+    bool smart_contract = 9;
+    repeated bytes smart_contract_result = 10;
+    repeated string misc = 11;
+    optional string native_function_fees = 12;
+    optional uint64 gas = 13;
+    repeated DelegatedData delegated_data = 14;
+    optional string interface_fee = 15;
+    optional string interface_fee_id = 16;
+}
+message ProposalContract
+{
+    string contract_id = 1;
+    repeated bytes proposal_ids = 2;
+    uint32 stage = 3;
+}
+
+message TXNWrapper{
+    oneof payload{
+        CoinTXN coin_txn = 1;
+        MintTXN mint_txn = 2;
+        ItemizedMintTXN item_mint_txn = 3;
+        InstrumentContract contract_txn = 4;
+        GovernanceVote governance_vote = 5;
+        GovernanceProposal governance_proposal = 6;
+        SmartContractTXN smart_contract = 7;
+        SmartContractExecuteTXN smart_contract_execute = 8;
+        ExpenseRatioTXN expense_ratios = 9;
+        NFTTXN nft_txn = 10;
+        ContractUpdateTXN contract_update_txn = 11;
+        ValidatorRegistration validator_registration_txn = 12;
+        ValidatorHeartbeat validator_heartbeat_txn = 13;
+        DelegatedTXN delegated_voting_txn = 14;
+        QuashTXN quash_txn = 15;
+        FastQuorumTXN fast_quorum_txn = 16;
+        RevokeTXN revoke_txn = 17;
+        ComplianceTXN compliance_txn = 18;
+        bool proposal_result_txn = 19;
+        BurnSBTTXN burn_sbt_txn = 20;
+        RequiredVersion required_version_txn = 21;
+        SmartContractInstantiateTXN smart_contract_instantiate_txn = 22;
+        AllowanceTXN allowance_txn = 23;
+    }
+    
+    TRANSACTION_TYPE txn_type = 24;
+    repeated bytes proposal_ids = 25;
+    repeated ProposalContract proposal_contracts = 26;
+    optional bool smart_contract_txn = 27;
+}

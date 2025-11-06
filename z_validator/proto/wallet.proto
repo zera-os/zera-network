@@ -1,0 +1,13 @@
+syntax = "proto3";
+
+import "txn.proto";
+
+package zera_wallets;
+
+option optimize_for = SPEED;
+
+message MaxSupply{
+	string max_supply = 1;
+	string circulation = 2;
+	repeated zera_txn.MaxSupplyRelease release = 3;
+}
