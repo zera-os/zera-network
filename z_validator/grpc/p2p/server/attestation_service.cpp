@@ -303,6 +303,11 @@ void ValidatorServiceImpl::ProcessBlockAttestationAsync(const zera_validator::Bl
     // store attestation in db
     // send attestation to other validators
 
+    if(db_validator_archive::exist(std::to_string(request->block_height())))
+    {
+        return;
+    }
+
     if (response->no_preference())
     {
         return;

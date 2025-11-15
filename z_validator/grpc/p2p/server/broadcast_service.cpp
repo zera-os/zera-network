@@ -112,9 +112,16 @@ void ValidatorServiceImpl::ProcessBroadcastAsync(const Block *request)
 {
 	Block *block = new Block();
 	block->CopyFrom(*request);
-	logging::print("ProcessBroadcastAsync");
+	logging::print("ProcessBroadcastAsync", true);
 
 	rocksdb::WriteBatch wallet_batch;
+
+	if(db_hash_index::exist(block->block_header().hash()))
+	{
+		delete block;
+		return;
+	}
+
 	ZeraStatus status = vp_broadcast::verify_broadcast_block(block);
 	if (!status.ok())
 	{
@@ -122,7 +129,6 @@ void ValidatorServiceImpl::ProcessBroadcastAsync(const Block *request)
 		delete block;
 		return;
 	}
-
 
 	signatures::sign_block_broadcast(block, ValidatorConfig::get_gen_key_pair());
 

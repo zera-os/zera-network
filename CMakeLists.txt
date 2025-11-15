@@ -43,9 +43,23 @@ set(SOURCES
     #main
     ${ZERA_DIR}/zera-validator.cpp
 
-    #REMOVE SOON
-    ${ZERA_DIR}/util/get_legal_string.cpp
-    
+    #utils
+    ${ZERA_DIR}/util/startup_config.cpp
+    ${ZERA_DIR}/util/threadpool.cpp
+    ${ZERA_DIR}/util/validate_block.cpp
+    ${ZERA_DIR}/util/utils.cpp
+    ${ZERA_DIR}/util/validators.cpp
+    ${ZERA_DIR}/util/validator_config.cpp
+    ${ZERA_DIR}/util/hex_conversion.cpp
+    ${ZERA_DIR}/util/base58.cpp
+    ${ZERA_DIR}/util/block.cpp
+
+    #crypto utils
+    ${ZERA_DIR}/crypto/signatures.cpp
+    ${ZERA_DIR}/crypto/merkle.cpp
+    ${ZERA_DIR}/crypto/wallets.cpp
+    ${ZERA_DIR}/crypto/lottery.cpp
+
     #standard
     ${ZERA_DIR}/block_process/template/process_allowance.cpp
     ${ZERA_DIR}/block_process/template/process_update_contract.cpp
@@ -75,12 +89,6 @@ set(SOURCES
     ${ZERA_DIR}/temp_data/fast_quorum_tracker.cpp
     ${ZERA_DIR}/temp_data/quash_tracker.cpp
     ${ZERA_DIR}/temp_data/supply_tracker.cpp
-
-    #crypto utils
-    ${ZERA_DIR}/crypto/signatures.cpp
-    ${ZERA_DIR}/crypto/merkle.cpp
-    ${ZERA_DIR}/crypto/wallets.cpp
-    ${ZERA_DIR}/crypto/lottery.cpp
 
     #database
     ${ZERA_DIR}/db/migrate_db.cpp
@@ -138,17 +146,6 @@ set(SOURCES
     ${ZERA_DIR}/smart_contract/native_functions/native_function_db_get_data.cpp
     ${ZERA_DIR}/smart_contract/native_functions/native_function_db_store_single.cpp
     ${ZERA_DIR}/smart_contract/native_functions/native_function_states.cpp
-
-    #utils
-    ${ZERA_DIR}/util/startup_config.cpp
-    ${ZERA_DIR}/util/threadpool.cpp
-    ${ZERA_DIR}/util/validate_block.cpp
-    ${ZERA_DIR}/util/utils.cpp
-    ${ZERA_DIR}/util/validators.cpp
-    ${ZERA_DIR}/util/validator_config.cpp
-    ${ZERA_DIR}/util/hex_conversion.cpp
-    ${ZERA_DIR}/util/base58.cpp
-    ${ZERA_DIR}/util/block.cpp
 
     #restricted
     ${ZERA_DIR}/restricted/restricted_keys.cpp

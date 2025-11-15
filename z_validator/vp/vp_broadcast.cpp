@@ -61,12 +61,11 @@ namespace
 
         std::vector<zera_txn::Validator> proposers;
         get_proposers(proposers);
-
         if(proposer_tracker::check_proposer(block.block_header().public_key()))
         {
             return ZeraStatus(ZeraStatus::Code::OK);
         }
-        
+
         return ZeraStatus(ZeraStatus::Code::PROPOSAL_ERROR, "vp_broadcast.cpp: verify_proposer: proposer does not match");
     }
 
@@ -76,6 +75,12 @@ ZeraStatus vp_broadcast::verify_broadcast_block(const zera_validator::Block *blo
 {
     zera_validator::Block block_copy;
     block_copy.CopyFrom(*block);
+    
+    if(db_hash_index::exist(block_copy.block_header().hash()))
+    {
+        return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "vp_broadcast.cpp: verify_broadcast_block: Block already exists");
+    }
+
     ZeraStatus status = signatures::verify_block_validator(block_copy);
     if (!status.ok())
     {

@@ -10,6 +10,7 @@ int main()
         return -1;
     }
 
+    logging::print("Startup configuration successful, starting block process.");
     block_process::start_block_process();
 
     return 0;

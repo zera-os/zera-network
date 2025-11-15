@@ -184,6 +184,10 @@ uint256_t get_fee(const std::string &fee_type)
         {
             return TREASURY_FEE_PERCENTAGE;
         }
+        else if(fee_type == "VALIDATOR_REGISTRATION_TXN_FEE")
+        {
+            return VALIDATOR_REGISTRATION_TXN_FEE;
+        }
 
         return 1;
     }

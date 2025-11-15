@@ -271,5 +271,8 @@ bool ValidatorNetworkClient::StartSyncBlockchain(bool seed_sync)
         return false;
     }
 
+    //TODO: remove log
+    logging::print("Blockchain synced successfully.");
+
     return true;
 }

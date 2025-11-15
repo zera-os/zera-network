@@ -27,6 +27,7 @@ constexpr int BLOCK_SYNC = 100; //amount of blocks requested at once when syncin
 constexpr int VALIDATOR_FEE_PERCENTAGE = 50; //the percentage of the fees that the validator recieves 
 constexpr int BURN_FEE_PERCENTAGE = 25; //the percentage of the fees that the burn recieves 
 constexpr int TREASURY_FEE_PERCENTAGE = 25; //the percentage of the fees that the treasury recieves 
+constexpr int VALIDATOR_REGISTRATION_TXN_FEE = 1000000000; //the fee for the validator registration transaction
 
 //STRINGS
 constexpr auto EVENT_MANAGEMENT_TEMP = "event_management_temp";

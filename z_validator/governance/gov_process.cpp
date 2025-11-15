@@ -443,7 +443,7 @@ namespace
         return ZeraStatus();
     }
 
-    ZeraStatus process_staggered_adaptive(const std::string &proposal_id, zera_txn::TXNS *txns, zera_txn::TXNStatusFees *status_fee, zera_txn::ProposalResult *result)
+    ZeraStatus process_staggered_adaptive(const std::string &proposal_id, zera_txn::TXNS *txns, zera_txn::TXNStatusFees *status_fee, zera_txn::ProposalResult *result, const std::string &fee_address)
     {
         std::string proposal_data;
         zera_validator::Proposal proposal;
@@ -464,7 +464,7 @@ namespace
             result->set_stage(1);
             calc(proposal, contract, result);
 
-            ZeraStatus status = proposal_wallet(proposal, true, status_fee, result, "");
+            ZeraStatus status = proposal_wallet(proposal, true, status_fee, result, fee_address);
             if (!status.ok())
             {
                 return status;
@@ -877,7 +877,7 @@ ZeraStatus gov_process::process_ledgers(zera_txn::TXNS *txns, zera_txn::TXNWrapp
     {
         zera_txn::TXNStatusFees status_fee;
         zera_txn::ProposalResult result;
-        status = process_staggered_adaptive(id, txns, &status_fee, &result);
+        status = process_staggered_adaptive(id, txns, &status_fee, &result, fee_address);
         if (status.ok())
         {
             status_fee.set_status(status.txn_status());

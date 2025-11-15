@@ -811,7 +811,8 @@ namespace
         std::string hash = block.block_header().previous_block_hash();
 
         db_headers_tag::get_last_data(header, key);
-        if (block.block_header().block_height() == 0 && !db_headers_tag::get_last_data(last_header, last_key))
+
+        if (block.block_header().block_height() == 0 && key == "" && header.block_height() == 0)
         {
             return ZeraStatus(ZeraStatus::Code::OK);
         }
@@ -882,9 +883,17 @@ namespace
         {
             logging::print("********ORIGINAL BLOCK********");
             logging::print(block.DebugString());
+            for(auto fee : block.transactions().token_fees())
+            {
+                logging::print("fee address: ", base58_encode(fee.address()), " fee amount: ", fee.tokens().at(0).amount(), true);
+            }
             // logging::print(base58_encode(block.transactions().token_fees(0).address()));
             logging::print("***MANUAL BLOCK***");
             logging::print(manual_block.DebugString());
+            for(auto fee : manual_block.transactions().token_fees())
+            {
+                logging::print("fee address: ", base58_encode(fee.address()), " fee amount: ", fee.tokens().at(0).amount(), true);
+            }
             // logging::print(base58_encode(manual_block.transactions().token_fees(0).address()));
             return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "block_sync_client.cpp: process_block: Token fees do not match");
         }
@@ -958,6 +967,7 @@ ZeraStatus ValidateBlock::block_process(const zera_validator::Block &block, bool
 
         int stat = check_genesis_validator_blocks(block);
 
+        // check for validator blocks
         if (stat == -2)
         {
             zera_validator::Block manual_block;
@@ -1004,9 +1014,13 @@ ZeraStatus ValidateBlock::block_process(const zera_validator::Block &block, bool
         }
         else if (stat == -1)
         {
+            //GENESIS BLOCK
             zera_validator::Block manual_block;
             manual_block.CopyFrom(block);
             store_block(manual_block);
+            std::string wallet_adr = wallets::generate_wallet(block.transactions().validator_registration_txns(0).base().public_key());
+            nonce_tracker::add_nonce(wallet_adr, 1, block.transactions().validator_registration_txns(0).base().hash());
+            nonce_tracker::add_used_nonce(wallet_adr, 1);
             block_process::store_txns(&manual_block, true, broadcast);
             return ZeraStatus();
         }

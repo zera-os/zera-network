@@ -118,11 +118,11 @@ void ThreadPool::workerThread()
         }
         catch (const std::exception &e)
         {
-            logging::print("Exception in task: " + std::string(e.what()));
+            logging::print("Exception in processing task: " + std::string(e.what()));
         }
         catch (...)
         {
-            logging::print("Unknown exception in task.");
+            logging::print("Unknown exception in processing task.");
         }
     }
 }
@@ -231,11 +231,11 @@ void ValidatorThreadPool::workerThread()
         }
         catch (const std::exception &e)
         {
-            logging::print("Exception in task: " + std::string(e.what()));
+            logging::print("Exception in validator task: " + std::string(e.what()));
         }
         catch (...)
         {
-            logging::print("Unknown exception in task.");
+            logging::print("Unknown exception in validator task.");
         }
     }
 }
