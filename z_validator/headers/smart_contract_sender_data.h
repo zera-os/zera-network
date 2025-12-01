@@ -4,6 +4,7 @@
 #include <any>
 #include <string>
 #include <vector>
+#include <map>
 
 struct SenderDataType
 {
@@ -32,4 +33,5 @@ struct SenderDataType
   WasmEdge_VMContext *VMCxt;                      // Original VM context
   std::vector<WasmEdge_StatisticsContext*> Stats; 
   uint64_t sc_nonce;                               // Smart contract nonce (Increases after every txn)
+  std::map<std::string, std::string> derived_wallets; // Derived wallets (key = base58-encoded wallet address, value = smart contract store key)
 };

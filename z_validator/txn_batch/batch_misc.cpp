@@ -6,6 +6,7 @@
 #include <ctime>
 #include <chrono>
 #include "wallets.h"
+#include "reorg.h"
 
 void txn_batch::batch_allowance_txns(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const uint64_t &block_time)
 {
@@ -101,7 +102,7 @@ void txn_batch::batch_allowance_txns(const zera_txn::TXNS &txns, const std::map<
     db_allowance::store_batch(allowance_batch);
 }
 
-void txn_batch::batch_required_version(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed)
+void txn_batch::batch_required_version(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const zera_validator::Block& block)
 {
     if (txns.has_required_version_txn())
     {
@@ -114,6 +115,10 @@ void txn_batch::batch_required_version(const zera_txn::TXNS &txns, const std::ma
             ValidatorConfig::set_required_version(required_version.version(0));
             db_system::remove_single(REQUIRED_VERSION);
             db_system::store_single(REQUIRED_VERSION, required_version.SerializeAsString());
+
+            Reorg::checkpoint_blockchain(std::to_string(required_version.version(0)), block.block_header());
+            // Immediately set shutdown to true so no more txns are processed
+            ValidatorConfig::set_shutdown(true);
         }
     }
 }

@@ -22,7 +22,7 @@ class txn_batch{
     static void batch_revoke(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
     static void batch_validator_heartbeat(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const uint64_t& block_height);
     static void batch_validator_registration(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const zera_validator::BlockHeader &header);
-    static void batch_required_version(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
+    static void batch_required_version(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const zera_validator::Block &block);
     static void batch_smart_contract(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
     static void batch_instantiate(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
     static void batch_allowance_txns(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const uint64_t &block_time);

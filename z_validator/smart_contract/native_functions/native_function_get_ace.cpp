@@ -7,7 +7,6 @@
 
 WasmEdge_Result GetACEData(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-    logging::print("[GetACEData] START");
     /*
      * Params: {i32, i32, i32}
      * Returns: {i32}
@@ -41,8 +40,6 @@ WasmEdge_Result GetACEData(void *Data, const WasmEdge_CallingFrameContext *CallF
         }
 
         std::string return_data = qualified + "," + rate_str;
-
-        logging::print("[GetACEData] Return data: ", return_data, true);
 
         const char *val = return_data.c_str();
         const size_t len = return_data.length();

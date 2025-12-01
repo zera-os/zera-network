@@ -1,4 +1,4 @@
-# Zera Network v1.0.0
+# Zera Network v1.0.1
 
 A high-performance, governance-driven blockchain network featuring smart contracts, compliance integration, and advanced consensus mechanisms.
 

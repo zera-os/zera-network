@@ -16,10 +16,10 @@ namespace
     uint256_t storage_fee = get_fee("STORAGE_FEE") * storage_size;
 
     uint256_t usd_equiv;
-    zera_fees::get_cur_equiv("$ZRA+0000", usd_equiv);
+    zera_fees::get_cur_equiv(NETWORK_CONTRACT, usd_equiv);
     storage_fee = (storage_fee * 1000000000) / usd_equiv;
 
-    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, "$ZRA+0000", storage_fee, sender.txn_hash);
+    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, NETWORK_CONTRACT, storage_fee, sender.txn_hash);
 
     if (!status.ok())
     {
@@ -158,12 +158,9 @@ WasmEdge_Result DelegateStoreState(void *Data, const WasmEdge_CallingFrameContex
         std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
 
         bool in_call_chain = false;
-        //todo - add back in
-        //logging::print("delegate_key: ", delegate_key, true);
 
         for (auto &call : sender.call_chain)
         {
-          //logging::print("call: ", call, true);
           if (call == delegate_key)
           {
             in_call_chain = true;

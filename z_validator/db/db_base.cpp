@@ -7,7 +7,9 @@
 #include <thread>
 #include <set>
 #include <map>
+#include <rocksdb/utilities/checkpoint.h>
 #include "../logging/logging.h"
+#include "validators.h"
 
 const char *const db_contracts_tag::DB_NAME = "contracts";
 const char *const db_contract_items_tag::DB_NAME = "contract_items";
@@ -684,64 +686,49 @@ int db_base<T>::backup_database(const std::string &backup_path)
 {
     std::lock_guard<std::mutex> lock(db_mutex);
 
-    // Create a snapshot
-    const rocksdb::Snapshot *snapshot = db->GetSnapshot();
-    rocksdb::ReadOptions read_options;
-    read_options.snapshot = snapshot;
-
     // Backup path
     std::string full_backup_path = DB_REORGS + backup_path + "/" + std::string(T::DB_NAME);
 
     try
     {
-        // Ensure the backup directory exists
-        std::filesystem::create_directories(full_backup_path);
+        // Remove existing backup directory if it exists (CreateCheckpoint requires empty/non-existent dir)
+        if (std::filesystem::exists(full_backup_path))
+        {
+            std::filesystem::remove_all(full_backup_path);
+        }
 
-        // Open a new rocksdb database at the backup location
-        rocksdb::Options options;
-        options.create_if_missing = true;
-        rocksdb::DB *backup_db;
-        rocksdb::Status status = rocksdb::DB::Open(options, full_backup_path, &backup_db);
+        // Ensure parent directory exists
+        std::filesystem::create_directories(DB_REORGS + backup_path);
+
+        // Create RocksDB Checkpoint object
+        rocksdb::Checkpoint *checkpoint;
+        rocksdb::Status status = rocksdb::Checkpoint::Create(db, &checkpoint);
         if (!status.ok())
         {
-            std::cerr << "Unable to open backup DB: " << status.ToString() << std::endl;
-            db->ReleaseSnapshot(snapshot);
+            logging::error("Failed to create backup checkpoint object: " + status.ToString());
             return 1;
         }
 
-        // Iterate over the data and write to the backup database
-        rocksdb::Iterator *it = db->NewIterator(read_options);
-        rocksdb::WriteBatch batch;
-        for (it->SeekToFirst(); it->Valid(); it->Next())
-        {
-            batch.Put(it->key(), it->value());
-        }
-        status = backup_db->Write(rocksdb::WriteOptions(), &batch);
-        delete it;
-        delete backup_db;
+        // Create the checkpoint (uses hard links when possible - very fast)
+        status = checkpoint->CreateCheckpoint(full_backup_path);
+        delete checkpoint;
 
-        // Check for errors during iteration
         if (!status.ok())
         {
-            std::cerr << "Error writing to backup DB: " << status.ToString() << std::endl;
-            db->ReleaseSnapshot(snapshot);
+            logging::error("Failed to create backup at " + full_backup_path + ": " + status.ToString());
             return 1;
         }
-
-        db->ReleaseSnapshot(snapshot);
 
         return 0; // Success
     }
     catch (const std::filesystem::filesystem_error &e)
     {
-        std::cerr << "Filesystem error: " << e.what() << std::endl;
-        db->ReleaseSnapshot(snapshot);
+        logging::error("Filesystem error during backup: " + std::string(e.what()));
         return 1;
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
-        db->ReleaseSnapshot(snapshot);
+        logging::error("Error during backup: " + std::string(e.what()));
         return 1;
     }
 }
@@ -800,102 +787,247 @@ template int db_base<db_sc_subscriber_tag>::backup_database(const std::string &b
 template int db_base<db_event_management_tag>::backup_database(const std::string &backup_path);
 
 template <typename T>
-int db_base<T>::restore_database(const std::string &backup_path) {
+int db_base<T>::checkpoint_database(const std::string &checkpoint_path)
+{
+    std::lock_guard<std::mutex> lock(db_mutex);
+
+    // checkpoint path
+    std::string full_checkpoint_path = DB_CHECKPOINTS + checkpoint_path + "/" + std::string(T::DB_NAME);
+
+    try
+    {
+        // Remove existing checkpoint directory if it exists (CreateCheckpoint requires empty/non-existent dir)
+        if (std::filesystem::exists(full_checkpoint_path))
+        {
+            std::filesystem::remove_all(full_checkpoint_path);
+        }
+
+        // Ensure parent directory exists
+        std::filesystem::create_directories(DB_CHECKPOINTS + checkpoint_path);
+
+        // Create RocksDB Checkpoint object
+        rocksdb::Checkpoint *checkpoint;
+        rocksdb::Status status = rocksdb::Checkpoint::Create(db, &checkpoint);
+        if (!status.ok())
+        {
+            logging::error("Failed to create checkpoint object: " + status.ToString());
+            return 1;
+        }
+
+        // Create the checkpoint (uses hard links when possible - very fast)
+        status = checkpoint->CreateCheckpoint(full_checkpoint_path);
+        delete checkpoint;
+
+        if (!status.ok())
+        {
+            logging::error("Failed to create checkpoint at " + full_checkpoint_path + ": " + status.ToString());
+            return 1;
+        }
+
+        logging::print("Checkpoint created successfully at " + full_checkpoint_path);
+        return 0; // Success
+    }
+    catch (const std::filesystem::filesystem_error &e)
+    {
+        logging::error("Filesystem error during checkpoint: " + std::string(e.what()));
+        return 1;
+    }
+    catch (const std::exception &e)
+    {
+        logging::error("Error during checkpoint: " + std::string(e.what()));
+        return 1;
+    }
+}
+template int db_base<db_contracts_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_hash_index_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_wallets_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_contract_supply_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_wallets_temp_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_smart_contracts_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_block_txns_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_restricted_wallets_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_validators_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_blocks_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_headers_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_transactions_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_contract_items_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_validator_lookup_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_validator_unbond_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_proposal_ledger_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_process_ledger_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_proposals_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_status_fee_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_process_adaptive_ledger_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_expense_ratio_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_proposal_wallets_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_proposals_temp_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_delegate_vote_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_delegate_recipient_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_delegate_wallets_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_timed_txns_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_quash_ledger_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_quash_lookup_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_wallet_lookup_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_fast_quorum_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_duplicate_txn_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_delegatees_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_voted_proposals_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_wallet_nonce_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_processed_txns_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_processed_wallets_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_preprocessed_nonce_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_validate_txns_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_gov_txn_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_sc_transactions_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_contract_price_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_attestation_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_confirmed_blocks_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_attestation_ledger_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_validator_archive_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_quash_ledger_lookup_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_system_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_gossip_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_sc_temp_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_allowance_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_sc_subscriber_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_event_management_tag>::checkpoint_database(const std::string &checkpoint_path);
+
+template <typename T>
+int db_base<T>::restore_database(const std::string &backup_path, int code)
+{
     std::lock_guard<std::mutex> lock(db_mutex);
 
     // Backup path
-    std::string full_backup_path = DB_COPY + backup_path + "/" + std::string(T::DB_NAME);
+    std::string full_backup_path;
+    if (code == 0)
+    {
+        full_backup_path = DB_COPY + backup_path + "/" + std::string(T::DB_NAME);
+    }
+    else if (code == 1)
+    {
+        full_backup_path = DB_REORGS + backup_path + "/" + std::string(T::DB_NAME);
+    }
+    else if (code == 2)
+    {
+        full_backup_path = DB_CHECKPOINTS + backup_path + "/" + std::string(T::DB_NAME);
+    }
+    else
+    {
+        // Critical: DO NOT reopen, system needs intervention
+        logging::critical("Invalid restore code provided: " + std::to_string(code));
+        // Will trigger shutdown.
+        ValidatorConfig::set_shutdown(true);
+        return 2;
+    }
+
     std::string database = DB_DIRECTORY + std::string(T::DB_NAME);
-    
+
     // Close the current database
     close_db();
 
-    try {
+    try
+    {
         // Ensure the database directory exists
         std::filesystem::create_directories(database);
 
         // Copy the backup to the database location recursively
         std::filesystem::copy(full_backup_path, database, std::filesystem::copy_options::recursive | std::filesystem::copy_options::overwrite_existing);
 
-        logging::print("Restoration completed from", full_backup_path, "to", database);
+        logging::print("Restoration completed from", full_backup_path, "to", database, true);
 
         // Reopen the database
         open_db();
 
         return 0; // Success
     }
-    catch (const std::filesystem::filesystem_error &e) {
-        std::cerr << "Filesystem error: " << e.what() << std::endl;
+    catch (const std::filesystem::filesystem_error &e)
+    {
+        logging::error("Filesystem error: " + std::string(e.what()));
 
-        //open the database if doesnt exist
-        open_db();
-        return 1; // Error
+        if (e.code() == std::errc::no_such_file_or_directory)
+        {
+            // Minor: backup doesn't exist, safe to reopen
+            logging::warn("Backup not found, keeping current database");
+            open_db();
+            return 1;
+        }
+        else
+        {
+            // Critical: DO NOT reopen, system needs intervention
+            logging::critical("Critical filesystem error during restore, shutting down.");
+            // Will trigger shutdown.
+            ValidatorConfig::set_shutdown(true);
+            return 2;
+        }
     }
     catch (const std::exception &e)
     {
-        std::cerr << "Error: " << e.what() << std::endl;
-        open_db();
-        return 1; // Error
+        logging::error("Error: " + std::string(e.what()));
+        logging::critical("Unknown error during restore, shutting down.");
+        // Will trigger shutdown.
+        ValidatorConfig::set_shutdown(true);
+        return 2;
     }
 }
-template int db_base<db_contracts_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_hash_index_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_wallets_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_contract_supply_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_wallets_temp_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_smart_contracts_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_block_txns_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_restricted_wallets_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_validators_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_blocks_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_headers_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_transactions_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_contract_items_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_validator_lookup_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_validator_unbond_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_proposal_ledger_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_process_ledger_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_proposals_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_status_fee_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_process_adaptive_ledger_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_expense_ratio_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_proposal_wallets_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_proposals_temp_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_delegate_vote_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_delegate_recipient_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_delegate_wallets_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_timed_txns_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_quash_ledger_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_quash_lookup_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_wallet_lookup_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_fast_quorum_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_duplicate_txn_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_delegatees_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_voted_proposals_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_wallet_nonce_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_processed_txns_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_processed_wallets_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_preprocessed_nonce_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_validate_txns_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_gov_txn_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_sc_transactions_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_contract_price_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_attestation_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_confirmed_blocks_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_attestation_ledger_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_validator_archive_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_quash_ledger_lookup_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_system_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_gossip_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_sc_temp_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_allowance_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_sc_subscriber_tag>::restore_database(const std::string &backup_path);
-template int db_base<db_event_management_tag>::restore_database(const std::string &backup_path);
+template int db_base<db_contracts_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_hash_index_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_wallets_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_contract_supply_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_wallets_temp_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_smart_contracts_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_block_txns_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_restricted_wallets_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_validators_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_blocks_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_headers_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_transactions_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_contract_items_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_validator_lookup_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_validator_unbond_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_proposal_ledger_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_process_ledger_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_proposals_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_status_fee_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_process_adaptive_ledger_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_expense_ratio_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_proposal_wallets_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_proposals_temp_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_delegate_vote_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_delegate_recipient_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_delegate_wallets_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_timed_txns_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_quash_ledger_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_quash_lookup_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_wallet_lookup_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_fast_quorum_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_duplicate_txn_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_delegatees_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_voted_proposals_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_wallet_nonce_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_processed_txns_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_processed_wallets_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_preprocessed_nonce_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_validate_txns_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_gov_txn_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_sc_transactions_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_contract_price_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_attestation_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_confirmed_blocks_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_attestation_ledger_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_validator_archive_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_quash_ledger_lookup_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_system_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_gossip_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_sc_temp_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_allowance_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_sc_subscriber_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_event_management_tag>::restore_database(const std::string &backup_path, int code);
 
 template <typename T>
 int db_base<T>::get_first_data(std::string &key, std::string &value)
 {
-    if (Reorg::is_in_progress.load()) {
+    if (Reorg::is_in_progress.load())
+    {
         // Handle the fact that a reorg is in progress, e.g., by postponing or skipping the function
         logging::print("Reorg in progress. Database operation delayed.");
         return 0;
@@ -932,7 +1064,8 @@ template int db_base<db_quash_ledger_tag>::get_first_data(std::string &key, std:
 template <typename T>
 int db_base<T>::get_next_data(const std::string &iterate_from, std::string &key, std::string &value)
 {
-    if (Reorg::is_in_progress.load()) {
+    if (Reorg::is_in_progress.load())
+    {
         // Handle the fact that a reorg is in progress, e.g., by postponing or skipping the function
         logging::print("Reorg in progress. Database operation delayed.");
         return 0;

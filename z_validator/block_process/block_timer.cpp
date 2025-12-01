@@ -20,7 +20,7 @@ namespace
         heartbeat.set_version(ValidatorConfig::get_version());
         zera_txn::BaseTXN *base = heartbeat.mutable_base();
         base->mutable_public_key()->set_single(ValidatorConfig::get_gen_public_key());
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_fee_amount("10000000000");
         base->set_memo("Validator Heartbeat");
         base->set_nonce(nonce);
@@ -71,6 +71,20 @@ namespace
     {
         while (!block_manager.my_block)
         {
+            // Guard: check if proposers vector is empty
+            if (block_manager.proposers.empty())
+            {
+                logging::error("get_proposer_or_new_block: proposers vector is empty - cannot continue");
+                break;
+            }
+
+            // Guard: check if proposer_index is valid
+            if (block_manager.proposer_index >= block_manager.proposers.size())
+            {
+                logging::error("get_proposer_or_new_block: proposer_index (" + std::to_string(block_manager.proposer_index) + ") >= proposers.size() (" + std::to_string(block_manager.proposers.size()) + ")");
+                break;
+            }
+
             block_manager.new_header.Clear();
             block_manager.new_key = "";
 
@@ -242,8 +256,9 @@ void block_process::start_block_process()
     block_manager.last_heartbeat = 0;
     block_manager.same_block = true;
     block_manager.wallet_adr = wallets::generate_wallet_single(ValidatorConfig::get_public_key());
-
-    while (true)
+    
+    //Shutdown triggered.
+    while (!ValidatorConfig::get_shutdown())
     {
         if (block_manager.last_heartbeat >= 450)
         {
@@ -268,6 +283,7 @@ void block_process::start_block_process()
 
         while (block_manager.same_block)
         {
+
             if (block_manager.proposal_timer >= 5)
             {
                 block_manager.proposal_timer = 0;

@@ -56,7 +56,6 @@ void pre_process::process_txn(TXType *txn, const zera_txn::TRANSACTION_TYPE &txn
             // add txn to preprocessed txns
             verify_txns::store_wrapper(txn, wrapper);
             db_processed_txns::store_single(txn_key, wrapper.SerializeAsString());
-
             // add txn to pending block txns
             db_block_txns::store_single(txn_hash, "1");
             zera_validator::TXN gossip_txn;
@@ -85,6 +84,7 @@ void pre_process::process_txn(TXType *txn, const zera_txn::TRANSACTION_TYPE &txn
     }
 
     recieved_txn_tracker::remove_txn(txn_hash);
+
 }
 template void pre_process::process_txn<zera_txn::GovernanceProposal>(zera_txn::GovernanceProposal *txn, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string& client_ip);
 template void pre_process::process_txn<zera_txn::GovernanceVote>(zera_txn::GovernanceVote *txn, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string& client_ip);

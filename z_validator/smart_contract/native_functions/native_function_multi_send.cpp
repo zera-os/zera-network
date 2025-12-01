@@ -77,7 +77,7 @@ namespace
         bool zra_allowed = false;
         for (auto id : contract.contract_fees().allowed_fee_instrument())
         {
-            if (id == "$ZRA+0000")
+            if (id == NETWORK_CONTRACT)
             {
                 zra_allowed = true;
                 break;
@@ -89,7 +89,7 @@ namespace
             return false;
         }
 
-        txn->set_contract_fee_id("$ZRA+0000");
+        txn->set_contract_fee_id(NETWORK_CONTRACT);
 
         uint256_t contract_fee(contract.contract_fees().fee());
         uint256_t denomination(contract.coin_denomination().amount());
@@ -135,9 +135,9 @@ namespace
     void calc_fee(zera_txn::CoinTXN *txn, uint256_t &txn_fee_amount)
     {
         uint256_t equiv;
-        zera_fees::get_cur_equiv("$ZRA+0000", equiv);
+        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
         zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract("$ZRA+0000", fee_contract);
+        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
 
         uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::COIN_TYPE));
         int byte_size = txn->ByteSize() + 64;
@@ -157,7 +157,7 @@ namespace
         base->mutable_public_key()->set_smart_contract_auth(sc_auth);
 
         base->set_fee_amount("1000000000000");
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
     }

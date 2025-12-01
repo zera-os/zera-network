@@ -55,6 +55,3 @@ WasmEdge_Result VerifySignature(void *Data, const WasmEdge_CallingFrameContext *
 
 WasmEdge_Result Hash(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                  const WasmEdge_Value *In, WasmEdge_Value *Out);
-
-// WasmEdge_Result ContractWallets(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
-//                                 const WasmEdge_Value *In, WasmEdge_Value *Out);

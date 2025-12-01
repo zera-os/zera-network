@@ -21,7 +21,4 @@ public:
 
 };
 
-void generate_key_pairs();
-
-
 #endif

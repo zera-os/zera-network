@@ -490,8 +490,6 @@ namespace
             uint256_t increment(input.amount());
             uint256_t sender_balance;
 
-            logging::print("wallet_adr + txn->contract_id(): ", wallet_adr + txn->contract_id(), true);
-            logging::print("base58_encode(wallet_adr): ", base58_encode(wallet_adr), true);
             ZeraStatus status = block_process::get_sender_wallet(wallet_adr + txn->contract_id(), sender_balance);
             if (!status.ok())
             {
@@ -723,6 +721,8 @@ ZeraStatus block_process::process_txn<zera_txn::CoinTXN>(const zera_txn::CoinTXN
 {
     bool gov = false;
     bool allowance = false;
+
+    
     if (txn->base().public_key().has_governance_auth())
     {
         ZeraStatus status = block_process::check_nonce(txn->base().public_key(), 0, txn->base().hash(), sc_txn);

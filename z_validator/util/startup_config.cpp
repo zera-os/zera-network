@@ -40,7 +40,6 @@
 #include "merkle.h"
 #include "logging.h"
 #include <random> // For random number generation
-#include "migrate_db.h"
 #include <filesystem>
 
 #include <boost/multiprecision/cpp_int.hpp>
@@ -96,6 +95,11 @@ namespace
     }
     bool check_config()
     {
+        if (ValidatorConfig::get_local_mode())
+        {
+            return true;
+        }
+
         if (ValidatorConfig::get_host() == "" || ValidatorConfig::get_client_port() == "" || ValidatorConfig::get_validator_port() == "" || ValidatorConfig::get_seed_validators().size() == 0 || ValidatorConfig::get_private_key() == "" || ValidatorConfig::get_public_key() == "" || ValidatorConfig::get_fee_address_string() == "" || ValidatorConfig::get_register() == "N/A")
         {
             return false;
@@ -123,17 +127,36 @@ namespace
         client_service.StartService(ValidatorConfig::get_client_port());
     }
 
-    void configure_self(zera_txn::ValidatorRegistration &registration_message)
+    bool configure_self(zera_txn::ValidatorRegistration &registration_message)
     {
         std::string validator_config = ValidatorConfig::get_block_height();
         if (validator_config != "NONE" && validator_config != "")
         {
             logging::print("Restoring database from", validator_config, false);
-            Reorg::restore_database(validator_config);
+            Reorg::restore_database(validator_config, 0);
+
+            if (ValidatorConfig::get_shutdown())
+            {
+                logging::print("Shutdown flag detected after reorg restoration. Exiting.");
+                return false;
+            }
             ValidatorConfig::set_config();
         }
 
         ValidatorConfig::generate_keys();
+
+        if (ValidatorConfig::get_gen_private_key() == "" || ValidatorConfig::get_gen_public_key() == "")
+        {
+            logging::print("Error generating validator keys. Please check your configuration.");
+            return false;
+        }
+
+        if (ValidatorConfig::get_register() == "reset")
+        {
+
+            return true;
+        }
+
         set_explorer_config();
         zera_txn::Validator validator;
 
@@ -141,7 +164,10 @@ namespace
         // gets registration txn and removes private key from memory
         // now using generated key for signing blocks
         get_validator_registration(&validator, &registration_message);
+
+        return true;
     }
+
     void create_heartbeat(zera_txn::ValidatorHeartbeat &heartbeat, const uint64_t &nonce)
     {
         heartbeat.set_online(true);
@@ -184,6 +210,12 @@ bool startup_config::configure_startup()
         return false;
     }
 
+    if (!logging::init())
+    {
+        std::cerr << "Error initializing logging system\n";
+        return false;
+    }
+
     // open all databases
     open_dbs();
 
@@ -193,8 +225,9 @@ bool startup_config::configure_startup()
     if (!check_config())
     {
         logging::print("Configuration is not set correctly. Please check your configuration file.");
-        return -1;
+        return false;
     }
+
     // 1. initial archive of balances
     // deregister if requested
     logging::print("Register: ", ValidatorConfig::get_register(), false);
@@ -203,7 +236,7 @@ bool startup_config::configure_startup()
     {
         deregister_validator();
         logging::print("You have been deregistered from the Zera Network. Your wallet will be free in 7 days.");
-        return -1;
+        return false;
     }
 
     std::string last_height;
@@ -212,45 +245,60 @@ bool startup_config::configure_startup()
     configure_rate_limiters();
 
     // 3. create a validator registration message to apply to the blockchain
-    configure_self(registration_message);
+    if (!configure_self(registration_message))
+    {
+        return false;
+    }
 
     // 5.
     debug::startup_logs();
-
-    // 8. Send registration message to 10 validators if have seed validator, else create a block with registration message
 
     bool sync = true;
 
     if (ValidatorConfig::get_seed_validators().size() > 0)
     {
         logging::print("Validator Registration Message");
-        ValidatorNetworkClient::StartRegisterSeeds(&registration_message);
-        logging::print("Registering to Zera Network... 10 seconds", false);
-        std::this_thread::sleep_for(std::chrono::seconds(10));
+        if(ValidatorConfig::get_register() != "reset")
+        {
+            logging::print("Registering to Zera Network... 10 seconds", false);
+            ValidatorNetworkClient::StartRegisterSeeds(&registration_message);
+            std::this_thread::sleep_for(std::chrono::seconds(10));
+        }
+        ValidatorNetworkClient::SyncFromCheckpoint();
         sync = ValidatorNetworkClient::StartSyncBlockchain(true);
         logging::print("Successfull Network sync.", false);
-
-        heartbeat = true;
+        if (sync)
+        {
+            heartbeat = true;
+        }
     }
-    else
+    else if (!ValidatorConfig::get_local_mode())
     {
         logging::print("No Seed Validators found, shutting down.", false);
-        return  false;
-    }
-
-    if (!sync)
-    {
-        logging::print("Failed to sync blockchain from seed validators.", false);
         return false;
     }
 
+    if (ValidatorConfig::get_local_mode())
+    {
+        logging::print("Local mode enabled, skipping network sync.", false);
+        zera_validator::BlockHeader header;
+        std::string key;
+        db_headers_tag::get_last_data(header, key);
+        Reorg::checkpoint_blockchain("vtest", header);
+    }
+
+    if (!sync && ValidatorConfig::get_register() != "reset")
+    {
+        logging::print("Failed to sync blockchain from seed validators. Please remove current blockchain data and try again.", false);
+        return false;
+    }
 
     zera_validator::BlockHeader last_header;
     std::string last_key;
     db_headers_tag::get_last_data(last_header, last_key);
     last_height = std::to_string(last_header.block_height());
 
-    if (!heartbeat)
+    if (!heartbeat && ValidatorConfig::get_register() != "reset")
     {
         validator_utils::archive_balances(last_height);
     }
@@ -266,7 +314,7 @@ bool startup_config::configure_startup()
         thread3 = std::thread(RunAPI);
     }
 
-    if (heartbeat)
+    if (heartbeat && ValidatorConfig::get_register() != "reset")
     {
         uint64_t nonce = registration_message.base().nonce() + 1;
         send_heartbeat(nonce);
@@ -275,6 +323,12 @@ bool startup_config::configure_startup()
         std::this_thread::sleep_for(std::chrono::seconds(10));
         ValidatorNetworkClient::StartSyncBlockchain(true);
         logging::print("Heartbeat Successful! Joining Zera Network.", false);
+    }
+
+    if (!db_validators::exist(ValidatorConfig::get_gen_public_key()))
+    {
+        logging::print("Validator not registered, please reregister your validator.", false);
+        return false;
     }
 
     // Detach threads so they can run independently
@@ -287,4 +341,4 @@ bool startup_config::configure_startup()
     }
 
     return true;
-} 
+}

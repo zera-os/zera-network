@@ -22,7 +22,7 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
 
     if (!db_smart_contracts::get_single(ACE_PROXY, ace_sc_key) || ace_sc_key == "")
     {
-        if (contract_id == "$ZRA+0000")
+        if (contract_id == NETWORK_CONTRACT)
         {
             cur_equiv = ONE_DOLLAR;
             return true;
@@ -36,7 +36,7 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
     std::string rate_data;
     if (!db_smart_contracts::get_single(ace_sc_key, rate_data) || rate_data == "")
     {
-        if (contract_id == "$ZRA+0000")
+        if (contract_id == NETWORK_CONTRACT)
         {
             cur_equiv = ONE_DOLLAR;
             return true;
@@ -47,7 +47,7 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
 
     if (!is_valid_uint256(rate_data))
     {
-        if (contract_id == "$ZRA+0000")
+        if (contract_id == NETWORK_CONTRACT)
         {
             cur_equiv = ONE_DOLLAR;
             return true;
@@ -58,7 +58,7 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
 
     uint256_t rate(rate_data);
 
-    if (contract_id == "$ZRA+0000")
+    if (contract_id == NETWORK_CONTRACT)
     {
         if (rate < ONE_DOLLAR)
         {

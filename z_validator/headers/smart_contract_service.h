@@ -4,6 +4,7 @@
 #include <any>
 #include <string>
 #include <vector>
+#include <map>
 
 
 
@@ -26,7 +27,8 @@ public:
       const std::string smart_contract_wallet,
       const uint64_t& gas_limit,
       uint64_t& used_gas,
-      std::vector<std::string>& txn_hashes);
+      std::vector<std::string>& txn_hashes,
+      std::map<std::string, std::string>& derived_wallets);
   static std::vector<std::any> runCall(std::string smart_contract_instance,const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv);
   static std::vector<std::any> run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes);
   static std::vector<std::any> runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes);

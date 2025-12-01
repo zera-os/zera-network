@@ -26,7 +26,6 @@ void txn_batch::batch_validator_heartbeat(const zera_txn::TXNS &txns, const std:
             validator.set_online(txn.online());
             validator.set_version(txn.version());
             validator.set_last_heartbeat(block_height);
-            std::string base58_pub = base58_encode_public_key(pub_str);
             batch.Put(pub_str, validator.SerializeAsString());
         }
     }

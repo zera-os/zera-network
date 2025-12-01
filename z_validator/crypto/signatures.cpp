@@ -400,6 +400,8 @@ template void signatures::sign_request<zera_validator::ValidatorSync>(zera_valid
 template void signatures::sign_request<zera_validator::ValidatorSyncRequest>(zera_validator::ValidatorSyncRequest *, KeyPair);
 template void signatures::sign_request<zera_validator::BlockSync>(zera_validator::BlockSync *, KeyPair);
 template void signatures::sign_request<zera_validator::BlockAttestation>(zera_validator::BlockAttestation *, KeyPair);
+template void signatures::sign_request<zera_validator::CheckpointInfoRequest>(zera_validator::CheckpointInfoRequest *, KeyPair);
+template void signatures::sign_request<zera_validator::CheckpointRequest>(zera_validator::CheckpointRequest *, KeyPair);
 
 void signatures::sign_new_coin_txn(zera_txn::CoinTXN *txn, std::vector<KeyPair> key_pairs)
 {
@@ -864,4 +866,34 @@ void signatures::sign_response(zera_api::SmartContractEventsSearchResponse *resp
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
     std::string signature = sign_message(message, key_pair);
     response->set_signature(signature);
+}
+
+bool signatures::verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest& request)
+{
+    zera_validator::CheckpointInfoRequest request_copy;
+    request_copy.CopyFrom(request);
+
+    std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
+    std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
+    std::string* signature_str = request_copy.release_signature();
+    std::string message_str = request_copy.SerializeAsString();
+    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> message(message_str.begin(), message_str.end());
+
+    return verify_signature(message, signature, public_key);
+}
+
+bool signatures::verify_checkpoint_request(const zera_validator::CheckpointRequest& request)
+{
+    zera_validator::CheckpointRequest request_copy;
+    request_copy.CopyFrom(request);
+
+    std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
+    std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
+    std::string* signature_str = request_copy.release_signature();
+    std::string message_str = request_copy.SerializeAsString();
+    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> message(message_str.begin(), message_str.end());
+
+    return verify_signature(message, signature, public_key);
 }

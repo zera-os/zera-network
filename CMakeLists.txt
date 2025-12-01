@@ -91,7 +91,6 @@ set(SOURCES
     ${ZERA_DIR}/temp_data/supply_tracker.cpp
 
     #database
-    ${ZERA_DIR}/db/migrate_db.cpp
     ${ZERA_DIR}/db/reorg.cpp
     ${ZERA_DIR}/db/db_config.cpp
     ${ZERA_DIR}/db/database.cpp
@@ -184,7 +183,6 @@ set(SOURCES
     ${ZERA_DIR}/blake3/blake3_portable.c
 
     #testing
-    ${ZERA_DIR}/test/test.cpp
     ${ZERA_DIR}/test/debug.cpp
 
      # #protobufs
@@ -201,12 +199,14 @@ set(SOURCES
     ${ZERA_DIR}/grpc/p2p/client/attestation_client.cpp
     ${ZERA_DIR}/grpc/p2p/client/block_sync_client.cpp
     ${ZERA_DIR}/grpc/p2p/client/validator_network_client.cpp
+    ${ZERA_DIR}/grpc/p2p/client/checkpoint_client.cpp
    
     ${ZERA_DIR}/grpc/client/client_network_service.cpp
        
     ${ZERA_DIR}/grpc/p2p/server/attestation_service.cpp
     ${ZERA_DIR}/grpc/p2p/server/block_sync_service.cpp
     ${ZERA_DIR}/grpc/p2p/server/broadcast_service.cpp
+    ${ZERA_DIR}/grpc/p2p/server/checkpoint_service.cpp
     ${ZERA_DIR}/grpc/p2p/api/nonce_service.cpp
     ${ZERA_DIR}/grpc/p2p/api/indexer_voting_service.cpp
     ${ZERA_DIR}/grpc/p2p/api/balance_service.cpp
@@ -278,5 +278,8 @@ target_link_libraries(zera-validator
     ssl
     crypto
     boost_system
-    wasmedge 
+    wasmedge
+    spdlog
+    fmt
+    pthread
 )

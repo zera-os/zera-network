@@ -80,13 +80,13 @@ namespace
     uint256_t storage_fee = get_fee("STORAGE_FEE") * storage_size;
     uint256_t usd_equiv;
 
-    if(!zera_fees::get_cur_equiv("$ZRA+0000", usd_equiv))
+    if(!zera_fees::get_cur_equiv(NETWORK_CONTRACT, usd_equiv))
     {
       return false;
     }
     storage_fee = (storage_fee * 1000000000) / usd_equiv;
 
-    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, "$ZRA+0000", storage_fee, sender.txn_hash);
+    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, NETWORK_CONTRACT, storage_fee, sender.txn_hash);
 
     if (!status.ok())
     {
@@ -429,33 +429,6 @@ int parse_and_store_inputs(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryInstanceCon
   return pointer_of_pointers;
 }
 
-// Function to generate a random string
-char *generate_random_string(int length)
-{
-  // Define the characters that can be included in the random string
-  const char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
-
-  // Calculate the size of the charset
-  int charset_size = sizeof(charset) - 1;
-
-  // Seed the random number generator
-  srand((unsigned int)time(NULL));
-
-  // Allocate memory for the random string (including the null terminator)
-  char *random_string = (char *)malloc((length + 1) * sizeof(char));
-
-  // Generate the random string
-  for (int i = 0; i < length; ++i)
-  {
-    int random_index = rand() % charset_size;
-    random_string[i] = charset[random_index];
-  }
-
-  // Null-terminate the string
-  random_string[length] = '\0';
-
-  return random_string;
-}
 
 std::vector<std::string> getWords(std::string s, std::string delim)
 {
@@ -926,31 +899,6 @@ WasmEdge_Result Emit(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
     return Res;
   }
 }
-WasmEdge_Result Randomish(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
-                          const WasmEdge_Value *In, WasmEdge_Value *Out)
-{
-  /*
-  * Params: {i32}
-    Returns: {i32}
-  */
-
-  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[0]);
-
-  WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-  // return random value
-
-  int len = 10;
-  char *random_str = generate_random_string(len);
-
-  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)random_str, TargetPointer, len);
-  Out[0] = WasmEdge_ValueGenI32(len);
-
-  // Don't forget to free the allocated memory
-  free(random_str);
-
-  return WasmEdge_Result_Success;
-}
 
 WasmEdge_Result Version(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
                         const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -1286,14 +1234,6 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_Call, sizeof(ReturnList_Call) / sizeof(ReturnList_Call[0]),
                      Call, "call");
 
-  // add "randomish" function
-  enum WasmEdge_ValType ParamList_Randomish[1] = {WasmEdge_ValType_I32};
-  enum WasmEdge_ValType ReturnList_Randomish[1] = {WasmEdge_ValType_I32};
-  CreateHostFunction(HostModCxt,
-                     ParamList_Randomish, sizeof(ParamList_Randomish) / sizeof(ParamList_Randomish[0]),
-                     ReturnList_Randomish, sizeof(ReturnList_Randomish) / sizeof(ReturnList_Randomish[0]),
-                     Randomish, "randomish");
-
   // add "version" function
   enum WasmEdge_ValType ParamList_Version[0];
   enum WasmEdge_ValType ReturnList_Version[1] = {WasmEdge_ValType_I32};
@@ -1302,7 +1242,6 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_Version, sizeof(ReturnList_Version) / sizeof(ReturnList_Version[0]),
                      Version, "version");
   //
-
   enum WasmEdge_ValType ParamList_Emit[2] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_Emit[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
@@ -1439,7 +1378,6 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_SendMulti, sizeof(ParamList_SendMulti) / sizeof(ParamList_SendMulti[0]),
                      ReturnList_SendMulti, sizeof(ReturnList_SendMulti) / sizeof(ReturnList_SendMulti[0]),
                      SendMulti, "send_multi");
-
   return HostModCxt;
 }
 
@@ -1709,7 +1647,8 @@ std::vector<std::any> smart_contract_service::eval(
     const std::string smart_contract_wallet,
     const uint64_t &gas_limit,
     uint64_t &used_gas,
-    std::vector<std::string> &txn_hashes)
+    std::vector<std::string> &txn_hashes,
+    std::map<std::string, std::string>& derived_wallets)
 {
   // store sender's data
   sender.pub_key = sender_pub_key;
@@ -1764,6 +1703,8 @@ std::vector<std::any> smart_contract_service::eval(
   {
     results.insert(results.begin(), sender.emited[i]);
   }
+  
+  derived_wallets = sender.derived_wallets;
 
   return results;
 }

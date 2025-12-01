@@ -46,10 +46,10 @@ namespace
         uint256_t txn_fee_amount;
 
         uint256_t equiv;
-        zera_fees::get_cur_equiv("$ZRA+0000", equiv);
+        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
 
         zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract("$ZRA+0000", fee_contract);
+        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
 
         uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::ALLOWANCE_TYPE));
         int byte_size = txn->ByteSize() + 64;
@@ -71,7 +71,7 @@ namespace
         sender.sc_nonce++;
 
         base->set_fee_amount("1000000000000");
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
     }
@@ -91,7 +91,7 @@ namespace
         sender.sc_nonce++;
 
         base->set_fee_amount("1000000000000");
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
     }
@@ -119,7 +119,7 @@ namespace
         base->mutable_public_key()->set_smart_contract_auth(sc_auth);
 
         base->set_fee_amount("1000000000000");
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
 
@@ -132,7 +132,7 @@ namespace
         base->mutable_public_key()->set_smart_contract_auth(sc_auth);
 
         base->set_fee_amount("100000000000");
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
 

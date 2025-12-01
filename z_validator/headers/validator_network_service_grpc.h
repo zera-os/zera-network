@@ -74,6 +74,10 @@ public:
     grpc::Status Balance(grpc::ServerContext *context, const zera_validator::BalanceRequest *request, zera_validator::BalanceResponse *response) override;
     grpc::Status Gossip(grpc::ServerContext *context, const zera_validator::TXNGossip *request, google::protobuf::Empty *response) override;
 
+    // Checkpoint sync for new validators
+    grpc::Status GetCheckpointInfo(grpc::ServerContext *context, const zera_validator::CheckpointInfoRequest *request, zera_validator::CheckpointInfo *response) override;
+    grpc::Status StreamCheckpoint(grpc::ServerContext *context, const zera_validator::CheckpointRequest *request, grpc::ServerWriter<zera_validator::CheckpointChunk> *writer) override;
+
     template <typename TXType>
     static void ProcessGossipTXN(const TXType *request, std::string client_ip);
 

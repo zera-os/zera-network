@@ -15,6 +15,7 @@ namespace
 {
     ZeraStatus check_auth(const zera_txn::BaseTXN &base, const std::string &contract_auth)
     {
+
         if (base.public_key().has_governance_auth() && base.public_key().governance_auth() != contract_auth)
         {
             zera_txn::InstrumentContract contract;
@@ -40,8 +41,10 @@ namespace
             // Remove the first 4 characters from contract_auth
             if (auth_id.length() > 4)
             {
-                std::string auth = contract_auth.substr(4);
+                std::string auth = auth_id.substr(4);
                 std::string contract_data;
+                //TODO - remove this
+
                 if (!db_contracts::get_single(auth, contract_data) || !gov_contract.ParseFromString(contract_data))
                 {
                     return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_proposal.cpp: check_auth: Contract does not exist.", zera_txn::TXN_STATUS::INVALID_CONTRACT);
@@ -54,14 +57,19 @@ namespace
 
             bool found_key = false;
             std::string gov_auth_key = "gov_" + gov_contract.contract_id();
+
             for (auto key : contract.restricted_keys())
             {
                 std::string own_r_key = wallets::get_public_key_string(key.public_key());
                 if (own_r_key == gov_auth_key)
                 {
+
                     for (auto gov_key : gov_contract.restricted_keys())
                     {
+
                         std::string gov_r_key = wallets::get_public_key_string(gov_key.public_key());
+
+
                         if (gov_r_key == gov_auth_key)
                         {
                             found_key = true;
@@ -156,6 +164,8 @@ namespace
             auto gov_txns = txn->governance_txn();
 
             std::string contract_adr = "gov_" + txn->contract_id();
+            logging::print("contract_adr: " + contract_adr, true);
+            logging::print("gov_txns size: " + std::to_string(gov_txns.size()), true);
 
             for (auto gov_txn : gov_txns)
             {

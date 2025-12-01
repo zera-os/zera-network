@@ -14,6 +14,7 @@
 #include "../../logging/logging.h"
 #include "hashing.h"
 #include "utils.h"
+#include "wallet.pb.h"
 
 WasmEdge_Result WalletAddress(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                               const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -151,7 +152,6 @@ WasmEdge_Result ContractExists(void *Data, const WasmEdge_CallingFrameContext *C
 WasmEdge_Result ContractDenomination(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                      const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-  logging::print("[ContractDenomination] START");
   uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
 
@@ -173,8 +173,6 @@ WasmEdge_Result ContractDenomination(void *Data, const WasmEdge_CallingFrameCont
     contract.ParseFromString(value);
 
     std::string denomination = contract.coin_denomination().amount();
-
-    logging::print("[ContractDenomination] Denomination: ", denomination, true);
 
     const char *val = denomination.c_str();
     const size_t len = denomination.length();
@@ -372,10 +370,9 @@ WasmEdge_Result CirculatingSupply(void *Data, const WasmEdge_CallingFrameContext
     return Res;
   }
 
-
   uint256_t circ_supply = get_circulating_supply(contract_id);
 
-  if(circ_supply == 0)
+  if (circ_supply == 0)
   {
     std::string circulation = "0";
     const char *val = circulation.c_str();
@@ -384,7 +381,6 @@ WasmEdge_Result CirculatingSupply(void *Data, const WasmEdge_CallingFrameContext
     Out[0] = WasmEdge_ValueGenI32(len);
     return WasmEdge_Result_Success;
   }
-
 
   // return caller address ...
   std::string circulation = circ_supply.str();
@@ -766,47 +762,47 @@ WasmEdge_Result Hash(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
   std::vector<uint8_t> hash_vec;
   std::string hash_str;
 
-  if(hash == "sha256")
+  if (hash == "sha256")
   {
     hash_vec = Hashing::sha256_hash(data_vec);
   }
-  else if(hash == "sha512")
+  else if (hash == "sha512")
   {
     hash_vec = Hashing::sha512_hash(data_vec);
   }
-  else if(hash == "blake3_256")
+  else if (hash == "blake3_256")
   {
     hash_vec = Hashing::blake3_hash(data_vec);
   }
-  else if(hash == "blake3_512")
+  else if (hash == "blake3_512")
   {
     hash_vec = Hashing::blake3_hash(data_vec, Blake3HashLength::Bits_512);
   }
-  else if(hash == "blake3_1024")
+  else if (hash == "blake3_1024")
   {
     hash_vec = Hashing::blake3_hash(data_vec, Blake3HashLength::Bits_1024);
   }
-  else if(hash == "blake3_2048")
+  else if (hash == "blake3_2048")
   {
     hash_vec = Hashing::blake3_hash(data_vec, Blake3HashLength::Bits_2048);
   }
-  else if(hash == "blake3_4096")
+  else if (hash == "blake3_4096")
   {
     hash_vec = Hashing::blake3_hash(data_vec, Blake3HashLength::Bits_4096);
   }
-  else if(hash == "blake3_9001")
+  else if (hash == "blake3_9001")
   {
     hash_vec = Hashing::blake3_hash(data_vec, Blake3HashLength::Bits_9001);
   }
-  else if(hash == "shake_1024")
+  else if (hash == "shake_1024")
   {
     hash_vec = Hashing::shake_hash(data_vec, SHAKEHashLength::Bits_1024);
   }
-  else if(hash == "shake_2048")
+  else if (hash == "shake_2048")
   {
     hash_vec = Hashing::shake_hash(data_vec, SHAKEHashLength::Bits_2048);
   }
-  else if(hash == "shake_4096")
+  else if (hash == "shake_4096")
   {
     hash_vec = Hashing::shake_hash(data_vec, SHAKEHashLength::Bits_4096);
   }
@@ -829,48 +825,3 @@ WasmEdge_Result Hash(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
 
   return WasmEdge_Result_Success;
 }
-// WasmEdge_Result ContractWallets(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
-//                                 const WasmEdge_Value *In, WasmEdge_Value *Out)
-// {
-//   uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
-//   uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
-
-//   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[3]);
-
-//   std::vector<unsigned char> ContractKey(ContractSize);
-
-//   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-//   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
-//   std::string contract_id;
-//   if (WasmEdge_ResultOK(Res))
-//   {
-//     std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-//     contract_id = contract_id_temp;
-//   }
-//   else
-//   {
-//     return Res;
-//   }
-
-//   SenderDataType sender = *(SenderDataType *)Data;
-
-//   std::string balance_data;
-//   size_t call_size = sender.wallet_chain.size();
-//   int call_index = call_size - 1;
-
-//   std::string wallet_key = sender.wallet_chain[call_index] + contract_id;
-
-//   if (!db_processed_wallets::get_single(wallet_key, balance_data) && !db_wallets::get_single(wallet_key, balance_data))
-//   {
-//     balance_data = "0";
-//   }
-
-//   const char *val = balance_data.c_str();
-//   const size_t len = balance_data.length();
-//   WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-//   Out[0] = WasmEdge_ValueGenI32(len);
-
-//   return WasmEdge_Result_Success;
-// }

@@ -214,11 +214,7 @@ namespace
         result->set_against_cur_equiv(boost::lexical_cast<std::string>(no_amount));
         result->set_passed(calculate_passed(result->support_cur_equiv(), result->against_cur_equiv(), contract, fast_quorum));
 
-        // TODO - remove HACK
-        if(ValidatorConfig::get_hack())
-        {
-            result->set_passed(true);
-        }
+        //PROPOSAL
     }
 
     bool calculate_passed_options(const zera_txn::ProposalResult *result, const zera_txn::InstrumentContract &contract, bool fast_quorum = false)
@@ -492,13 +488,9 @@ namespace
             google::protobuf::Timestamp process_date;
             process_date.ParseFromString(values.at(x));
 
-            // TODO - make HACK
             uint64_t process_time = process_date.seconds();
-            if(ValidatorConfig::get_hack())
-            {
-                process_time = process_time - 864000;
-            }
-            
+
+            //PROPOSAL
             if (block->block_header().timestamp().seconds() >= process_time)
             {
 

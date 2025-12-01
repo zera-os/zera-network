@@ -415,7 +415,7 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
     gov_process::check_ledgers(block);
     update_proposal_ledgers(block);
     restricted_keys_check::check_quash_ledger(block);
-    txn_batch::batch_required_version(txns, txn_passed);
+    txn_batch::batch_required_version(txns, txn_passed, *block);
     logging::print("****************************\nDONE Storing Block: " + std::to_string(block->block_header().block_height()));
     return ZeraStatus();
 }

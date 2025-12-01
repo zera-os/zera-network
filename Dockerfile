@@ -23,6 +23,7 @@ RUN apt-get update && apt-get upgrade -y && apt-get install -y \
     libleveldb-dev \
     libboost-all-dev \
     libsodium-dev \
+    libspdlog-dev \
     wget \
     git \
     ccache \

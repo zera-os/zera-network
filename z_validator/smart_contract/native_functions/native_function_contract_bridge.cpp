@@ -101,9 +101,9 @@ namespace
     void calc_fee(zera_txn::InstrumentContract *txn)
     {
         uint256_t equiv;
-        zera_fees::get_cur_equiv("$ZRA+0000", equiv);
+        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
         zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract("$ZRA+0000", fee_contract);
+        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
 
         uint256_t fee_per_byte(get_txn_fee_contract(zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, txn));
         int byte_size = txn->ByteSize() + 64;
@@ -126,7 +126,7 @@ namespace
         base->set_fee_amount("1000000000000");
         base->set_nonce(sender.sc_nonce);
         sender.sc_nonce++;
-        base->set_fee_id("$ZRA+0000");
+        base->set_fee_id(NETWORK_CONTRACT);
         base->set_safe_send(false);
         base->mutable_timestamp()->set_seconds(sender.block_time);
     }

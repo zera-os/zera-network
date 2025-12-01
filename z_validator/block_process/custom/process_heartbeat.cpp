@@ -44,7 +44,6 @@ ZeraStatus block_process::process_txn<zera_txn::ValidatorHeartbeat>(const zera_t
 {
     zera_txn::Validator validator;
     std::string validator_str;
-
     if (!db_validators::get_single(wallets::get_public_key_string(txn->base().public_key()), validator_str))
     {
         return ZeraStatus(ZeraStatus::TXN_FAILED, "Validator not registered", zera_txn::TXN_STATUS::VALIDATOR_ADDRESS);

@@ -55,6 +55,8 @@ namespace signatures {
     bool verify_message(const std::string& message, const std::string& signature, const std::string& public_key);
     void sign_response(zera_api::ContractResponse *response, KeyPair key_pair);
     void sign_response(zera_api::SmartContractEventsSearchResponse *response, KeyPair key_pair);
+    bool verify_checkpoint_request(const zera_validator::CheckpointRequest& request);
+    bool verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest& request);
     // std::string sign_message(const std::vector<unsigned char>& message, KeyPair key_pair);
     // bool verify_signature(const std::vector<unsigned char>& message, std::vector<unsigned char>& signature, std::vector<unsigned char>& public_key);
 };

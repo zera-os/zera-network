@@ -75,6 +75,7 @@ namespace
         uint256_t total_balance = 0;
         uint256_t validator_min_hold = get_fee("VALIDATOR_HOLDING_MINIMUM");
         uint256_t validator_min_zera = get_fee("VALIDATOR_MINIMUM_ZERA");
+
         if (txn->validator().staked_contract_ids_size() <= 0)
         {
             std::string balance_str;
@@ -106,7 +107,6 @@ namespace
             std::string stake_data;
             zera_validator::StakeMultipliers stake_multipliers;
             db_system::get_single(STAKE_MULTIPLIER, stake_data);
-            stake_multipliers.ParseFromString(stake_data);
             stake_multipliers.ParseFromString(stake_data);
 
             std::string full_multiplier = stake_multipliers.default_multiplier();

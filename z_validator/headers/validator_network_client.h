@@ -71,6 +71,11 @@ public:
 	static void StartRegisterSeeds(const ValidatorRegistration *request);
 	static void StartHeartBeat(const zera_txn::ValidatorHeartbeat *request);
 
+	// Checkpoint sync functions
+	grpc::Status GetCheckpointInfo(const zera_validator::CheckpointInfoRequest* request, zera_validator::CheckpointInfo* response);
+	grpc::Status StreamCheckpoint(const zera_validator::CheckpointRequest* request, const std::string& output_path);
+	static bool SyncFromCheckpoint();
+
 	static zera_validator::NonceResponse GetNonce(const std::string &server_address)
 	{
 

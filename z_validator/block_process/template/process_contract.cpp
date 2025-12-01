@@ -380,7 +380,7 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
 
         for (auto id : txn->contract_fees().allowed_fee_instrument())
         {
-            if (id == "$ZRA+0000")
+            if (id == NETWORK_CONTRACT)
             {
                 zra_found = true;
                 break;

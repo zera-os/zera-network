@@ -11,3 +11,8 @@ message MaxSupply{
 	string circulation = 2;
 	repeated zera_txn.MaxSupplyRelease release = 3;
 }
+
+message DerivedWallets
+{
+	map<string, bool> wallets = 1; // key = base58-encoded wallet address, value = smart contract store key
+}

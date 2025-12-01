@@ -32,7 +32,8 @@ public:
     static int get_first_data(std::string &key, std::string &value);
     static int get_next_data(const std::string &iterate_from, std::string &key, std::string &value);
     static int backup_database(const std::string &backup_path);
-    static int restore_database(const std::string &backup_path);
+    static int restore_database(const std::string &backup_path, int code);
+    static int checkpoint_database(const std::string &version);
     static int compact_all();
 
 private:

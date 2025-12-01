@@ -11,18 +11,18 @@
 #include "zera_api.pb.h"
 #include "validator_api_client.h"
 #include "hex_conversion.h"
+#include <map>
 
 namespace
 {
     void storage_fees(const zera_txn::SmartContractExecuteTXN *txn, const uint256_t &fees, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
     {
         uint256_t usd_equiv;
-        std::string contract_id = "$ZRA+0000";
         zera_txn::InstrumentContract contract;
 
         auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
 
-        zera_fees::process_fees(contract, fees, wallet_adr, contract_id, true, status_fees, txn->base().hash(), fee_address, true);
+        zera_fees::process_fees(contract, fees, wallet_adr, NETWORK_CONTRACT, true, status_fees, txn->base().hash(), fee_address, true);
     }
 
     ZeraStatus gas_fees(const zera_txn::SmartContractExecuteTXN *txn, const uint64_t &used_gas, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
@@ -154,6 +154,7 @@ namespace
         zera_txn::PublicKey smart_contract_pub_key;
         smart_contract_pub_key.set_smart_contract_auth("sc_" + instance_name);
         std::string smart_contract_wallet = wallets::generate_wallet(smart_contract_pub_key);
+        std::map<std::string, std::string> derived_wallets;
 
         try
         {
@@ -164,7 +165,7 @@ namespace
                                                                          txn->base().hash(), timestamp,
                                                                          block_txns_key, fee_address,
                                                                          smart_contract_wallet, gas_approved,
-                                                                         used_gas, txn_hashes);
+                                                                         used_gas, txn_hashes, derived_wallets);
 
             // store result
             std::string event_data = "";
@@ -215,6 +216,21 @@ namespace
                 std::string txn_hash = hex_conversion::bytes_to_hex(txn->base().hash());
                 event.set_txn_hash(txn_hash);
                 event.set_event_data(event_data);
+            }
+
+            if(derived_wallets.size() > 0)
+            {
+                for(const auto& [key, value] : derived_wallets)
+                {
+                    std::string temp_value;
+                    zera_wallets::DerivedWallets derived_wallet;
+                    db_smart_contracts::get_single(key, temp_value);
+                    derived_wallet.ParseFromString(temp_value);
+
+                    derived_wallet.mutable_wallets()->insert({value, true});
+                    db_smart_contracts::store_single(key, derived_wallet.SerializeAsString());
+                    logging::print("[ProcessSmartContractInstantiate] Storing derived wallet:", key, "->", value);
+                }
             }
 
             txn_hash_tracker::add_sc_to_hash();

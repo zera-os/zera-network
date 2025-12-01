@@ -52,10 +52,11 @@ public:
 	static std::string get_register();
 	static std::vector<std::string> get_whitelist(); 		//get whitelisted ips for rate_limiter
 	static void set_required_version(const uint32_t& version);
-	static bool get_hack();
-	static void set_hack(const bool hack);
 	static BlockWork get_block_work();
-	static bool get_nuke();
+	static bool get_shutdown();
+	static void set_shutdown(bool shutdown);
+	static bool get_local_mode();
+	static void set_local_mode(bool local_mode);
 
 	static std::string get_block_height();
 	static bool get_dev_mode();
@@ -83,10 +84,9 @@ public:
 	static bool dev_mode_;
 	static std::string register_;
 	static std::vector<std::string> white_list_;
-	//TODO - Remove "hack"
-	static bool hack_;
 	static BlockWork block_work_;
-	static bool nuke_;
+	static bool shutdown_;
+	static bool local_mode_;
 
 	static void set_block_work(uint64_t block_height);
 	static void clear_block_work();
@@ -107,7 +107,6 @@ public:
 	static void set_register(const std::string& register_str);
 	static void set_api_port(const std::string& api_port);
 	static void set_whitelist(const std::string& whitelist);
-	static void set_nuke(bool nuke);
 };
 
 

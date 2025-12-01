@@ -6,6 +6,7 @@
 #include "const.h"
 #include "../logging/logging.h"
 #include "fees.h"
+#include "base58.h"
 
 const std::string WASM2WAT_LOCATION = "Downloads/wabt/build/wasm2wat";
 
@@ -15,6 +16,30 @@ const std::vector<std::string> FORBIDDEN_WASM_OPS{
     "f32.div",
     "f64.div",
 };
+
+
+namespace {
+    // RAII wrapper for temporary files
+    class TempFile {
+        std::string path_;
+        bool should_delete_;
+    public:
+        TempFile(const std::string& path) : path_(path), should_delete_(true) {}
+        
+        ~TempFile() {
+            if (should_delete_ && !path_.empty()) {
+                std::remove(path_.c_str());  // C++ way, more portable than system()
+            }
+        }
+        
+        const std::string& path() const { return path_; }
+        void keep() { should_delete_ = false; }
+        
+        // Prevent copying
+        TempFile(const TempFile&) = delete;
+        TempFile& operator=(const TempFile&) = delete;
+    };
+}
 
 namespace
 {
@@ -26,58 +51,51 @@ namespace
             logging::print("smart_contract already exists");
             return false;
         }
-
-        // Validate wasm file
-        //
-        // 1. save wasm file to disk
-        //
-        int from = 1;
-        int to = 99999999;
-        int random_num = rand() % (to - from + 1) + from;
-        std::time_t t = std::time(0);
-        std::string wasm_file_location = "/tmp/" + std::to_string(t) + "_" + std::to_string(random_num) + ".wasm";
-        std::ofstream out(wasm_file_location, std::ios::binary);
-
-        if (!out)
+    
+        auto storage_file_name = base58_encode(txn->base().hash());
+        
+        // RAII objects will clean up automatically on ANY return path
+        TempFile wasm_file("/tmp/" + storage_file_name + ".wasm");
+        TempFile wat_file("/tmp/" + storage_file_name + ".wat");
+    
+        // 1. Write WASM file
         {
-            std::cerr << "Error: unable to open file for writing: " << wasm_file_location << std::endl;
-            return false;
+            std::ofstream out(wasm_file.path(), std::ios::binary);
+            if (!out)
+            {
+                logging::print("Error: unable to open file for writing: " + wasm_file.path());
+                return false;  // ✅ TempFile destructor cleans up
+            }
+            out << txn->binary_code();
+            // out.close() happens automatically via RAII
         }
-
-        out << txn->binary_code();
-        out.close();
-        //
+    
         // 2. wasm2wat
-        //
-        std::string wat_file_location = "/tmp/" + std::to_string(t) + "_" + std::to_string(random_num) + ".wat";
-        std::string command = WASM2WAT_LOCATION + " " + wasm_file_location + " -o " + wat_file_location;
+        std::string command = WASM2WAT_LOCATION + " " + wasm_file.path() + " -o " + wat_file.path();
         int result = system(command.c_str());
-
+    
         if (result != 0)
         {
-            std::cerr << "Error: wasm2wat command failed with exit code " << result << std::endl;
-            return false;
+            logging::print("Error: wasm2wat command failed with exit code " + std::to_string(result));
+            return false;  // ✅ Both TempFiles clean up automatically
         }
-
-        // 3. validate
+    
+        // 3. Validate
         std::string wat_file_content;
-        std::getline(std::ifstream(wat_file_location), wat_file_content, '\0');
+        std::getline(std::ifstream(wat_file.path()), wat_file_content, '\0');
+        
         bool is_valid = true;
-        for (auto it = FORBIDDEN_WASM_OPS.begin(); it != FORBIDDEN_WASM_OPS.end(); ++it)
+        for (const auto& forbidden_op : FORBIDDEN_WASM_OPS)
         {
-            if (wat_file_content.find(*it) != std::string::npos)
+            if (wat_file_content.find(forbidden_op) != std::string::npos)
             {
                 is_valid = false;
-                logging::print("NOT VALID:", *it);
+                logging::print("NOT VALID:", forbidden_op);
                 break;
             }
         }
-
-        //
-        // 4. cleanup
-        system(("rm " + wasm_file_location).c_str());
-        system(("rm " + wat_file_location).c_str());
-
+    
+        // ✅ Cleanup happens automatically when TempFile objects go out of scope
         return is_valid;
     }
 }
