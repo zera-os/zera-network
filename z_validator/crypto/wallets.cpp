@@ -571,9 +571,6 @@ KeyPair wallets::generate_key_pair(KeyType key_type)
     key_pair.public_key = std::vector<uint8_t>(public_key_data.begin(), public_key_data.end());
     key_pair.private_key = std::vector<uint8_t>(private_key_data.begin(), private_key_data.end());
 
-    // Create a new signing context and initialize it with the private key
-    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
-
     // Free the resources used by the EVP_PKEY and EVP_PKEY_CTX objects
     EVP_PKEY_free(pkey);
     EVP_PKEY_CTX_free(ctx);
