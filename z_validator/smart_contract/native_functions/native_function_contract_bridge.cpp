@@ -12,6 +12,7 @@
 #include "fees.h"
 #include <google/protobuf/timestamp.pb.h>
 #include <google/protobuf/util/time_util.h>
+#include "nf_helpers.h"
 
 namespace
 {
@@ -46,7 +47,7 @@ namespace
     void make_restricted_key(zera_txn::InstrumentContract *txn, const std::string &authorized_key, SenderDataType &sender)
     {
         zera_txn::RestrictedKey restricted_key4;
-        restricted_key4.mutable_public_key()->set_smart_contract_auth("sc_bridge_proxy_1");
+        restricted_key4.mutable_public_key()->set_smart_contract_auth("sc_zera_bridge_proxy_1");
         restricted_key4.set_mint(true);
         txn->add_restricted_keys()->CopyFrom(restricted_key4);
         restricted_key4.set_key_weight(0);
@@ -62,7 +63,6 @@ namespace
         restricted_key.set_revoke(true);
         restricted_key.set_key_weight(0);
         txn->add_restricted_keys()->CopyFrom(restricted_key);
-
 
         zera_txn::RestrictedKey *restricted_key3 = txn->add_restricted_keys();
         std::string own_gov_key = "gov_" + txn->contract_id();
@@ -96,39 +96,6 @@ namespace
         restricted_key2.set_revoke(true);
         restricted_key2.set_key_weight(1);
         txn->add_restricted_keys()->CopyFrom(restricted_key2);
-    }
-
-    void calc_fee(zera_txn::InstrumentContract *txn)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
-
-        uint256_t fee_per_byte(get_txn_fee_contract(zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, txn));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-        int256_t txn_fee_amount;
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination) / equiv;
-
-        uint256_t key_fee = get_key_fee(txn->base().public_key());
-        txn_fee_amount += (key_fee * denomination) / equiv;
-
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-        base->set_fee_amount("1000000000000");
-        base->set_nonce(sender.sc_nonce);
-        sender.sc_nonce++;
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
     }
 
     std::string process_txn(SenderDataType &sender, const zera_txn::InstrumentContract &txn)
@@ -196,7 +163,8 @@ namespace
 
         uint64_t start_timestamp = sender.block_time + 604800;
         create_gov(&txn, start_timestamp);
-        calc_fee(&txn);
+        uint256_t txn_fee_amount;
+        calc_fee_contract_txn(&txn, sender.fee_id, txn_fee_amount);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -208,7 +176,7 @@ namespace
 
 WasmEdge_Result InstrumentContractBridge(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     // if(sender.smart_contract_wallet != "")
     // {
@@ -385,7 +353,7 @@ WasmEdge_Result InstrumentContractBridge(void *Data, const WasmEdge_CallingFrame
         return Res10;
     }
 
-    std::string status = create_instrument_contract_bridge(sender, symbol, name, denomination, contract_id, mint_id, uri, authorized_key, pre_mint_wallet, premint_amount);
+    std::string status = create_instrument_contract_bridge(*sender, symbol, name, denomination, contract_id, mint_id, uri, authorized_key, pre_mint_wallet, premint_amount);
 
     const char *val = status.c_str();
     const size_t len = status.length();

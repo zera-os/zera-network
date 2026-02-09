@@ -292,3 +292,27 @@ int database::compact_all(rocksdb::DB* db)
     db->CompactRange(rocksdb::CompactRangeOptions(), nullptr, nullptr);
     return 1;
 }
+
+int database::find_by_prefix(rocksdb::DB* db, const std::string& prefix, std::vector<std::string>& keys, std::vector<std::string>& values)
+{
+    if (Reorg::is_in_progress.load()) {
+        logging::print("Reorg in progress. Database operation delayed.");
+        return 0;
+    }
+
+    rocksdb::Iterator* it = db->NewIterator(rocksdb::ReadOptions());
+
+    for (it->Seek(prefix); it->Valid() && it->key().starts_with(prefix); it->Next()) {
+        keys.push_back(it->key().ToString());
+        values.push_back(it->value().ToString());
+    }
+
+    if (!it->status().ok()) {
+        logging::print("Error during key iteration:", it->status().ToString());
+        delete it;
+        return 0;
+    }
+
+    delete it;
+    return keys.size();
+}

@@ -120,6 +120,7 @@ template ZeraStatus block_process::restricted_check<zera_txn::ComplianceTXN>(con
 template ZeraStatus block_process::restricted_check<zera_txn::RevokeTXN>(const zera_txn::RevokeTXN *txn, const zera_txn::TRANSACTION_TYPE &txn_type);
 template ZeraStatus block_process::restricted_check<zera_txn::BurnSBTTXN>(const zera_txn::BurnSBTTXN *txn, const zera_txn::TRANSACTION_TYPE &txn_type);
 template ZeraStatus block_process::restricted_check<zera_txn::AllowanceTXN>(const zera_txn::AllowanceTXN *txn, const zera_txn::TRANSACTION_TYPE &txn_type);
+template ZeraStatus block_process::restricted_check<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *txn, const zera_txn::TRANSACTION_TYPE &txn_type);
 
 template <>
 ZeraStatus block_process::restricted_check<zera_txn::InstrumentContract>(const zera_txn::InstrumentContract *txn, const zera_txn::TRANSACTION_TYPE &txn_type)
@@ -162,7 +163,7 @@ ZeraStatus block_process::process_txn(const TXType *txn, zera_txn::TXNStatusFees
         }
     }
     uint256_t fee_amount;
-    status = zera_fees::process_simple_fees(txn, status_fees, txn_type, fee_address);
+    status = zera_fees::process_simple_fees(txn, status_fees, txn_type, fee_address, sc_txn);
 
     if (!status.ok())
     {
@@ -210,3 +211,4 @@ template ZeraStatus block_process::process_txn<zera_txn::RevokeTXN>(const zera_t
 template ZeraStatus block_process::process_txn<zera_txn::ContractUpdateTXN>(const zera_txn::ContractUpdateTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn);
 template ZeraStatus block_process::process_txn<zera_txn::BurnSBTTXN>(const zera_txn::BurnSBTTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn);
 template ZeraStatus block_process::process_txn<zera_txn::AllowanceTXN>(const zera_txn::AllowanceTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn);
+template ZeraStatus block_process::process_txn<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn);

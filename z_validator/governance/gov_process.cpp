@@ -213,8 +213,6 @@ namespace
         result->set_support_cur_equiv(boost::lexical_cast<std::string>(yes_amount));
         result->set_against_cur_equiv(boost::lexical_cast<std::string>(no_amount));
         result->set_passed(calculate_passed(result->support_cur_equiv(), result->against_cur_equiv(), contract, fast_quorum));
-
-        //PROPOSAL
     }
 
     bool calculate_passed_options(const zera_txn::ProposalResult *result, const zera_txn::InstrumentContract &contract, bool fast_quorum = false)
@@ -490,10 +488,8 @@ namespace
 
             uint64_t process_time = process_date.seconds();
 
-            //PROPOSAL
             if (block->block_header().timestamp().seconds() >= process_time)
             {
-
                 wrapper.add_proposal_ids(keys.at(x));
                 has_proposals = true;
             }

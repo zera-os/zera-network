@@ -31,10 +31,13 @@ namespace
 
         // get the currency equivalent multiplier
         uint256_t fee_equiv;
-        if(zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv))
+        zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv);
+        
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
 
         uint256_t denomination(contract.coin_denomination().amount());
         uint256_t contract_fee(nft.contract_fees().fee());

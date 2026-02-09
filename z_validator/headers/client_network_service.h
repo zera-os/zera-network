@@ -42,6 +42,7 @@ public:
     grpc::Status BurnSBT(grpc::ServerContext *context, const zera_txn::BurnSBTTXN *request, google::protobuf::Empty *response) override;
     grpc::Status SmartContractInstantiate(grpc::ServerContext *context, const zera_txn::SmartContractInstantiateTXN *request, google::protobuf::Empty *response) override;
     grpc::Status Allowance(grpc::ServerContext *context, const zera_txn::AllowanceTXN *request, google::protobuf::Empty *response) override;
+    grpc::Status ProposalCancel(grpc::ServerContext *context, const zera_txn::ProposalCancelTXN *request, google::protobuf::Empty *response) override;
 
     void StartService(const std::string &port = "50052")
     {

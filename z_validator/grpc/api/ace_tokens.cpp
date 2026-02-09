@@ -22,17 +22,30 @@ grpc::Status APIImpl::RecieveGetTokenFeeInfo(grpc::ServerContext *context, const
         {
             continue;
         }
-        if(!zera_fees::get_cur_equiv(contract_id, currency_equiv_data))
+
+        zera_validator::FeeToken fee_token;
+        std::string fee_token_data;
+        if(!db_fee_tokens::get_single(FEE_TOKENS + contract_id, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
         {
-            continue;
+            token_fee_info.set_authorized(false);
+            token_fee_info.set_allowed_fees("0");
+            token_fee_info.set_used_fees("0");
         }
+        else
+        {
+            token_fee_info.set_authorized(fee_token.authorized());
+            token_fee_info.set_allowed_fees(fee_token.stable_value_allowed());
+            token_fee_info.set_used_fees(fee_token.value_used());
+        }
+
+        zera_fees::get_cur_equiv(contract_id, currency_equiv_data);
 
         zera_txn::InstrumentContract contract;
         contract.ParseFromString(contract_data);
 
+
         token_fee_info.set_contract_id(contract_id);
         token_fee_info.set_rate(currency_equiv_data.str());
-        token_fee_info.set_authorized(true);
         token_fee_info.set_denomination(contract.coin_denomination().amount());
         token_fee_info.mutable_contract_fees()->CopyFrom(contract.contract_fees());
         response->add_tokens()->CopyFrom(token_fee_info);

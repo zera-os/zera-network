@@ -26,6 +26,7 @@ class txn_batch{
     static void batch_smart_contract(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
     static void batch_instantiate(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
     static void batch_allowance_txns(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed, const uint64_t &block_time);
+    static void batch_proposal_cancel(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed);
 
 
     // determine which transactions passed in block for storing data

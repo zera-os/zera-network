@@ -87,11 +87,12 @@ namespace
         {
             std::string public_key = wallets::get_public_key_string(txn->base().public_key());
 
-            if(public_key != "sc_bridge_proxy_1")
+            if(public_key != "sc_bridge_proxy_1" && public_key != "sc_zera_bridge_proxy_1")
             {
                 return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_mint.cpp: mint: Only bridge smart contract can mint.", zera_txn::TXN_STATUS::INVALID_AUTH_KEY);
             }
         }
+
 
         if (contract.type() != zera_txn::CONTRACT_TYPE::TOKEN)
         {
@@ -145,7 +146,7 @@ ZeraStatus block_process::process_txn<zera_txn::MintTXN>(const zera_txn::MintTXN
         }
     }
 
-    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::MINT_TYPE, fee_address);
+    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::MINT_TYPE, fee_address, sc_txn);
     if (!status.ok())
     {
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.message(), status.txn_status());

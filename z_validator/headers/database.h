@@ -24,5 +24,6 @@ public:
 	static void commit(rocksdb::DB* db);
 	static int get_all_keys(rocksdb::DB* db, std::vector<std::string>& keys);
 	static int compact_all(rocksdb::DB* db);
+	static int find_by_prefix(rocksdb::DB* db, const std::string& prefix, std::vector<std::string>& keys, std::vector<std::string>& values);
 };
 #endif

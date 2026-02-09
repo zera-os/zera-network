@@ -124,6 +124,11 @@ void Reorg::backup_blockchain(const std::string &block_height)
     db_allowance::backup_database(block_height);
     db_event_management::backup_database(block_height);
     db_sc_subscriber::backup_database(block_height);
+    db_fee_tokens::backup_database(block_height);
+    db_fee_tokens_temp::backup_database(block_height);
+    db_staked_coins_voted::backup_database(block_height);
+    db_staked_coins_voted_temp::backup_database(block_height);
+
 
     // Note: backup_blockchain is for reorg recovery (temporary)
     // No tar needed - these get deleted after block confirmation
@@ -185,6 +190,11 @@ void Reorg::checkpoint_blockchain(const std::string &version, const zera_validat
     db_allowance::checkpoint_database(version);
     db_event_management::checkpoint_database(version);
     db_sc_subscriber::checkpoint_database(version);
+    db_fee_tokens::checkpoint_database(version);
+    db_fee_tokens_temp::checkpoint_database(version);
+    db_staked_coins_voted::checkpoint_database(version);
+    db_staked_coins_voted_temp::checkpoint_database(version);
+    db_smart_contract_states::checkpoint_database(version);
 
     // 2. Create tar.gz of entire checkpoint directory for state sync
     std::string checkpoint_dir = DB_CHECKPOINTS + version;
@@ -288,6 +298,12 @@ void Reorg::restore_database(const std::string &block_height, int code)
     db_allowance::restore_database(block_height, code);
     db_sc_subscriber::restore_database(block_height, code);
     db_event_management::restore_database(block_height, code);
+    db_fee_tokens::restore_database(block_height, code);
+    db_fee_tokens_temp::restore_database(block_height, code);
+    db_staked_coins_voted::restore_database(block_height, code);
+    db_staked_coins_voted_temp::restore_database(block_height, code);
+    db_smart_contract_states::restore_database(block_height, code);
+
 
     db_preprocessed_nonce::remove_all();
     db_processed_wallets::remove_all();
@@ -297,6 +313,8 @@ void Reorg::restore_database(const std::string &block_height, int code)
     db_transactions::remove_all();
     db_wallets_temp::remove_all();
     db_gossip::remove_all();
+    db_fee_tokens_temp::remove_all();
+
 
     std::vector<std::string> keys;
     std::vector<std::string> values;

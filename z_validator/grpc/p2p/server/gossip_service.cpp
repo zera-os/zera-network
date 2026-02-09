@@ -259,12 +259,25 @@ namespace
                 }
                 break;
             }
+            case zera_txn::TRANSACTION_TYPE::PROPOSAL_CANCEL_TYPE:
+            {
+                // Handle PROPOSAL_CANCEL_TYPE
+                zera_txn::ProposalCancelTXN proposal_cancel_txn;
+                if (proposal_cancel_txn.ParseFromString(value.serialized_txn()))
+                {
+                    ValidatorServiceImpl::ProcessGossipTXN(&proposal_cancel_txn, client_ip);
+                }
+                break;
+
+            }
             default:
                 break;
-            }
+
         }
     }
 }
+
+} // end anonymous namespace
 
 template <typename TXType>
 void ValidatorServiceImpl::ProcessGossipTXN(const TXType *request, std::string client_ip)

@@ -36,6 +36,7 @@ public:
     grpc::Status SmartContractActivityRequest(grpc::ServerContext *context, const zera_api::ActivityRequest *request, google::protobuf::Empty *response) override;
     grpc::Status Contract(grpc::ServerContext *context, const zera_api::ContractRequest *request, zera_api::ContractResponse *response) override;
     grpc::Status SmartContractEventsSearch(grpc::ServerContext *context, const zera_api::SmartContractEventsSearchRequest *request, zera_api::SmartContractEventsSearchResponse *response) override;
+    grpc::Status GetAllAuthorizedFees(grpc::ServerContext *context, const google::protobuf::Empty *request, zera_api::GetAllAuthorizedFeesResponse *response) override;
 
     void StartService(const std::string &port = "50053")
     {
@@ -78,7 +79,8 @@ private:
     grpc::Status RecieveSmartContractActivityRequest(grpc::ServerContext *context, const zera_api::ActivityRequest *request, google::protobuf::Empty *response);
     grpc::Status RecieveRequestContract(grpc::ServerContext *context, const zera_api::ContractRequest *request, zera_api::ContractResponse *response);
     grpc::Status RecieveSmartContractEventsSearch(grpc::ServerContext *context, const zera_api::SmartContractEventsSearchRequest *request, zera_api::SmartContractEventsSearchResponse *response);
-
+    grpc::Status RecieveGetAllAuthorizedFees(grpc::ServerContext *context, const google::protobuf::Empty *request, zera_api::GetAllAuthorizedFeesResponse *response);
+    
     static bool check_rate_limit(grpc::ServerContext *context)
     {
         // Get the client's IP address

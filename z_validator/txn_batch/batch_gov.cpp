@@ -175,6 +175,13 @@ namespace
 
             break;
         }
+        case zera_txn::TRANSACTION_TYPE::PROPOSAL_CANCEL_TYPE:
+        {
+            zera_txn::ProposalCancelTXN txn;
+            txn.ParseFromString(gov_txn.serialized_txn());
+            verify_txns::store_wrapper(&txn, wrapper);
+            break;
+        }
         case zera_txn::TRANSACTION_TYPE::UKNOWN_TYPE:
         {
             break;
@@ -300,7 +307,7 @@ namespace
                     std::string value_str = (*map)[voting_id];
                     uint256_t value = boost::lexical_cast<uint256_t>(value_str);
 
-                    if(value < client_votes)
+                    if (value < client_votes)
                     {
                         value = 0;
                     }
@@ -321,7 +328,7 @@ namespace
                     std::string value_str = (*map)[voting_id];
                     uint256_t value = boost::lexical_cast<uint256_t>(value_str);
 
-                    if(value < client_votes)
+                    if (value < client_votes)
                     {
                         value = 0;
                     }
@@ -345,7 +352,7 @@ namespace
                 std::string value_str = (*inner_map)[voting_id];
                 uint256_t value = boost::lexical_cast<uint256_t>(value_str);
 
-                if(value < client_votes)
+                if (value < client_votes)
                 {
                     value = 0;
                 }
@@ -380,11 +387,11 @@ namespace
                 old_support_option = vote_wallet.proposal_votes().at(base58_encode(client_vote.proposal_id())).option();
             }
 
-            if(!vote_wallet.proposal_votes().at(base58_encode(client_vote.proposal_id())).has_stage())
+            if (!vote_wallet.proposal_votes().at(base58_encode(client_vote.proposal_id())).has_stage())
             {
                 change_vote = false;
             }
-            else if(vote_wallet.proposal_votes().at(base58_encode(client_vote.proposal_id())).stage() !=  proposal.stage())
+            else if (vote_wallet.proposal_votes().at(base58_encode(client_vote.proposal_id())).stage() != proposal.stage())
             {
                 change_vote = false;
             }
@@ -398,7 +405,6 @@ namespace
             change_vote = false;
         }
 
-
         zera_validator::Voter voter;
         bool has_amount = true;
         if (!db_wallets::get_single(wallet_adr + voting_id, client_amount))
@@ -409,9 +415,9 @@ namespace
 
         uint256_t client_votes(client_amount);
 
-        if(change_state == 0)
+        if (change_state == 0)
         {
-            if(change_vote)
+            if (change_vote)
             {
                 change_state = 1;
             }
@@ -420,11 +426,27 @@ namespace
                 change_state = 2;
             }
         }
+        std::string staked_coins_voted_key = client_vote.proposal_id() + "_" + wallet_adr;
 
         if (change_state == 1 && has_amount)
         {
-            remove_votes(client_votes, proposal, voting_id, old_support, old_support_option);
+            uint256_t total_votes = client_votes;
+            if (proposal.contract_id() == NETWORK_CONTRACT)
+            {
+                std::string proposal_wallet_data;
+
+                if (db_staked_coins_voted::get_single(staked_coins_voted_key, proposal_wallet_data))
+                {
+                    total_votes += boost::lexical_cast<uint256_t>(proposal_wallet_data);
+                }
+            }
+
+            remove_votes(total_votes, proposal, voting_id, old_support, old_support_option);
         }
+
+        uint256_t staked_vote = get_staked_coins(proposal.contract_id(), wallet_adr);
+
+        client_votes += staked_vote;
 
         // if proposal has option voting add amount to option
         if (!proposal.options_set())
@@ -490,6 +512,7 @@ namespace
         voter.set_stage(proposal.stage());
         (*vote_wallet.mutable_proposal_votes())[base58_encode(client_vote.proposal_id())] = voter;
 
+        db_staked_coins_voted::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(staked_vote));
         db_proposal_wallets::store_single(wallet_adr, vote_wallet.SerializeAsString());
         db_proposals::store_single(client_vote.proposal_id(), proposal.SerializeAsString());
     }
@@ -550,7 +573,7 @@ void txn_batch::batch_votes(const zera_txn::TXNS &txns, const std::map<std::stri
             std::string proposal_id = base58_encode(client_vote.proposal_id());
 
             store_own_priority(client_vote_adr, proposal.contract_id(), proposal_id);
-    
+
             // get proposal from db and parse into Proposal opject
             if (db_proposals::get_single(client_vote.proposal_id(), votes_data) && proposal.ParseFromString(votes_data))
             {
@@ -595,6 +618,7 @@ void txn_batch::batch_proposal_results(const zera_txn::TXNS &txns, const std::ma
 {
     rocksdb::WriteBatch proposal_batch;
     rocksdb::WriteBatch adaptive_ledger_batch;
+    rocksdb::WriteBatch staked_coins_voted_batch;
 
     std::vector<std::string> contract_ids;
     std::vector<zera_txn::ProposalResult> staged_results;
@@ -644,6 +668,7 @@ void txn_batch::batch_proposal_results(const zera_txn::TXNS &txns, const std::ma
 
                     logging::print("batch results end_timestamp:", std::to_string(proposal_ledger.stage_end_date().seconds()));
                     logging::print("batch results start_timestamp:", std::to_string(proposal_ledger.stage_start_date().seconds()));
+
                     db_proposal_ledger::store_single(result.contract_id(), proposal_ledger.SerializeAsString());
                 }
             }
@@ -704,21 +729,78 @@ void txn_batch::batch_proposal_results(const zera_txn::TXNS &txns, const std::ma
             logging::print("final stage:", std::to_string(result.final_stage()), "fast quorum:", std::to_string(result.fast_quorum()));
             logging::print("passed:", std::to_string(result.passed()), "governance txn size:", std::to_string(proposal.governance_txn_size()));
 
-            if (result.final_stage() && result.passed() && proposal.governance_txn_size() > 0 && !result.proposal_cut())
+            if (result.final_stage() && result.passed() && !result.proposal_cut())
             {
-                // store txn in gov_txns so validators can confirm this txn came from governance
-                int x = 0;
-                for (auto gov_txn : proposal.governance_txn())
+                if (proposal.governance_txn_size() > 0)
                 {
-                    zera_txn::TXNWrapper wrapper;
-                    wrap_gov_txn(wrapper, gov_txn);
-                    std::string txn_id = get_txn_key(x, result.proposal_id());
-                    db_gov_txn::store_single(gov_txn.txn_hash(), wrapper.SerializeAsString());
-                    x++;
+                    // store txn in gov_txns so validators can confirm this txn came from governance
+                    int x = 0;
+                    for (auto gov_txn : proposal.governance_txn())
+                    {
+                        zera_txn::TXNWrapper wrapper;
+                        wrap_gov_txn(wrapper, gov_txn);
+                        std::string txn_id = get_txn_key(x, result.proposal_id());
+                        db_gov_txn::store_single(gov_txn.txn_hash(), wrapper.SerializeAsString());
+                        x++;
+                    }
+                }
+
+
+
+                if (proposal.governance_option_txns_size() > 0)
+                {
+                    int option_index = 0;
+                    uint256_t largest_vote = 0;
+                    int x = 0;
+
+                    for(auto option_cur_equiv : result.option_cur_equiv())
+                    {
+                        uint256_t vote = boost::lexical_cast<uint256_t>(option_cur_equiv);
+                        if(vote > largest_vote)
+                        {
+                            largest_vote = vote;
+                            option_index = x;
+                        }
+
+                        x++;
+                    }
+
+                    if(option_index != 0)
+                    {
+                        for (auto option_txn : proposal.governance_option_txns())
+                        {
+                            if(option_txn.option_index() == option_index)
+                            {
+                                int x = 0;
+
+                                for (auto gov_txn : option_txn.governance_txn())
+                                {
+                                    zera_txn::TXNWrapper wrapper;
+                                    wrap_gov_txn(wrapper, gov_txn);
+                                    std::string txn_id = get_txn_key(x, result.proposal_id());
+                                    db_gov_txn::store_single(gov_txn.txn_hash(), wrapper.SerializeAsString());
+                                    x++;
+                                }
+                                break;
+                            }
+                        }   
+                    }
                 }
             }
-        }
 
+            std::string staked_coins_voted_key = result.proposal_id();
+            std::vector<std::string> keys;
+            std::vector<std::string> values;
+            db_staked_coins_voted::find_by_prefix(staked_coins_voted_key, keys, values);
+            int y = 0;
+            while (y < keys.size())
+            {
+                std::string key = keys[y];
+                staked_coins_voted_batch.Delete(key);
+                y++;
+            }
+        }
+        db_staked_coins_voted::store_batch(staked_coins_voted_batch);
         db_proposals::store_batch(proposal_batch);
     }
 }

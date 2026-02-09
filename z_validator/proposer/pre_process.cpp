@@ -158,6 +158,13 @@ void proposing::add_transaction(zera_txn::TXNWrapper &wrapper, zera_txn::TXNS *b
         block_txns->add_allowance_txns()->CopyFrom(wrapper.allowance_txn());
         add_used_nonce(wrapper.allowance_txn());
     }
+    else if(wrapper.has_proposal_cancel_txn())
+    {
+        txn_hash_tracker::add_hash(wrapper.proposal_cancel_txn().base().hash());
+        get_fees_status(wrapper.proposal_cancel_txn(), block_txns);
+        block_txns->add_proposal_cancel_txns()->CopyFrom(wrapper.proposal_cancel_txn());
+        add_used_nonce(wrapper.proposal_cancel_txn());
+    }
 }
 
 bool proposing::add_processed_sync(const std::vector<std::string> &keys, const std::vector<std::string> &values, zera_validator::Block *block)

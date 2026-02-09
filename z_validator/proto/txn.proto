@@ -27,6 +27,7 @@ service TXNService{
     rpc Compliance(ComplianceTXN) returns (google.protobuf.Empty);
     rpc BurnSBT(BurnSBTTXN) returns (google.protobuf.Empty);
     rpc Allowance(AllowanceTXN) returns (google.protobuf.Empty);
+    rpc ProposalCancel(ProposalCancelTXN) returns (google.protobuf.Empty);
 }
 
 enum TXN_STATUS{
@@ -98,7 +99,8 @@ enum TRANSACTION_TYPE
     SBT_BURN_TYPE = 20;
     REQUIRED_VERSION = 21;
     SMART_CONTRACT_INSTANTIATE_TYPE = 22;
-    ALLOWANCE_TYPE = 23;        //CHANGE - Allowance transaction type
+    ALLOWANCE_TYPE = 23;       
+    PROPOSAL_CANCEL_TYPE = 24;
 }
 //ENUMS
 enum LANGUAGE{
@@ -138,6 +140,11 @@ enum CONTRACT_TYPE{
     TOKEN = 0;
     NFT = 1;
     SBT = 2;
+}
+message ProposalCancelTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    bytes proposal_id = 3;
 }
 message DelegateContract{
     int32 priority= 1;
@@ -280,6 +287,7 @@ message BaseTXN{
     optional string interface_fee = 11;
     optional string interface_fee_id = 12;
     optional bytes interface_address = 13;
+    optional bytes sc_fee_address = 14;
 }
 message PublicKey{
     bytes single = 1;
@@ -449,6 +457,11 @@ message GovernanceProposal{
     optional google.protobuf.Timestamp start_timestamp = 7;
     optional google.protobuf.Timestamp end_timestamp = 8;
     repeated GovernanceTXN governance_txn = 9;
+    repeated GovernanceOptionTXNS governance_option_txns = 10;
+}
+message GovernanceOptionTXNS{
+    repeated GovernanceTXN governance_txn = 1;
+    int32 option_index = 2;
 }
 message GovernanceTXN{
     TRANSACTION_TYPE txn_type = 1;
@@ -463,6 +476,7 @@ message SmartContractTXN{
     LANGUAGE language = 3;
     repeated string functions = 5;
     //repeated string dependencies = 6;
+    optional bool sc_fees = 6;
 }
 message Parameters
 {
@@ -579,6 +593,7 @@ message TXNS{
     repeated SmartContractInstantiateTXN smart_contract_instantiate_txns = 25;
     optional RequiredVersion required_version_txn = 26;
     repeated AllowanceTXN allowance_txns = 27;
+    repeated ProposalCancelTXN proposal_cancel_txns = 28;
 }
 
 message Token{
@@ -641,6 +656,7 @@ message TXNWrapper{
         RequiredVersion required_version_txn = 21;
         SmartContractInstantiateTXN smart_contract_instantiate_txn = 22;
         AllowanceTXN allowance_txn = 23;
+        ProposalCancelTXN proposal_cancel_txn = 28;
     }
     
     TRANSACTION_TYPE txn_type = 24;

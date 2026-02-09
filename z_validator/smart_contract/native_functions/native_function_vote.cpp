@@ -10,40 +10,10 @@
 #include "utils.h"
 #include "smart_contract_sender_data.h"
 #include "fees.h"
+#include "nf_helpers.h"
 
 namespace
 {
-    void calc_fee(zera_txn::GovernanceVote *txn)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
-
-        uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::VOTE_TYPE));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-        int256_t txn_fee_amount;
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination)  / equiv;
-
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("1000000000000");
-        base->set_nonce(sender.sc_nonce);
-        sender.sc_nonce++;
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-
-    }
 
     std::string process_txn(SenderDataType &sender, const zera_txn::GovernanceVote &txn)
     {
@@ -71,7 +41,7 @@ namespace
         zera_txn::BaseTXN *base = txn.mutable_base();
 
         set_base(base, sender);
-        calc_fee(&txn);
+        calc_fee(base, sender.fee_id, txn.ByteSize(), zera_txn::TRANSACTION_TYPE::VOTE_TYPE);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -83,7 +53,7 @@ namespace
 }
 WasmEdge_Result Vote(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -173,12 +143,10 @@ WasmEdge_Result Vote(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
     auto hex_id = hex_conversion::hex_to_bytes(proposal_id);
     std::string proposal_id_str(hex_id.begin(), hex_id.end());
 
-    std::string status = create_vote(sender, txn);
+    std::string status = create_vote(*sender, txn);
 
     const char *val = status.c_str();
     const size_t len = status.length();
-
-    auto fee_address = sender.fee_address;
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);

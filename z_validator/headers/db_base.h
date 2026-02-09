@@ -35,6 +35,7 @@ public:
     static int restore_database(const std::string &backup_path, int code);
     static int checkpoint_database(const std::string &version);
     static int compact_all();
+    static int find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
 
 private:
     static rocksdb::DB *db;
@@ -293,6 +294,31 @@ class db_allowance_tag
 public:
     static const char *const DB_NAME;
 };
+class db_staked_coins_voted_temp_tag
+{
+public:
+    static const char *const DB_NAME;
+};
+class db_staked_coins_voted_tag
+{
+public:
+    static const char *const DB_NAME;
+};
+class db_fee_tokens_tag
+{
+public:
+    static const char *const DB_NAME;
+};
+class db_fee_tokens_temp_tag
+{
+public:
+    static const char *const DB_NAME;
+};
+class db_smart_contract_states_tag
+{
+public:
+    static const char *const DB_NAME;
+};
 class db_validators_tag
 {
 public:
@@ -377,3 +403,8 @@ using db_sc_temp = db_base<db_sc_temp_tag>;                       // store all t
 using db_allowance = db_base<db_allowance_tag>;                   // store all allowance data for each wallet (key = pub_key + wallet_adr + contract_id) (value = allowance value)
 using db_sc_subscriber = db_base<db_sc_subscriber_tag>;           // store all subscribers for each smart contract (key = smart_contract_id) (value = map<wallet_adr_base58, Subscriber>) and key = wallet_adr_base58_NONCE (value = nonce)
 using db_event_management = db_base<db_event_management_tag>;     // store all event management data (key = smart_contract_id) (value = list of event_keys/timestamps)
+using db_staked_coins_voted_temp = db_base<db_staked_coins_voted_temp_tag>; // store all staked coins that have been voted for each proposal (key = proposal_id) (value = map<wallet_adr, value>)
+using db_staked_coins_voted = db_base<db_staked_coins_voted_tag>; // store all staked coins that have been voted for each proposal (key = wallet_adr + proposal_id) (value = staked_coins)
+using db_fee_tokens = db_base<db_fee_tokens_tag>; // store all fee tokens that have been used for each txn (key = wallet_address + contract_id) (value = fee_token)
+using db_fee_tokens_temp = db_base<db_fee_tokens_temp_tag>; // store all fee tokens that have been used for each txn (key = wallet_address + contract_id) (value = fee_token)
+using db_smart_contract_states = db_base<db_smart_contract_states_tag>; // store all states for each smart contract (key = smart_contract_id + state_key) (value = state_value)

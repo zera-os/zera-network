@@ -201,9 +201,7 @@ public:
             db_smart_contracts::remove_single(execute_key);
             return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "Smart contract txn failed", zera_txn::TXN_STATUS::FAULTY_TXN);
         }
-
         db_smart_contracts::remove_single(execute_key);
-
         return status;
     }
 

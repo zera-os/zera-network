@@ -20,6 +20,7 @@
 #include "../logging/logging.h"
 #include "validators.h"
 #include "fees.h"
+#include "nf_helpers.h"
 
 using namespace std;
 
@@ -74,38 +75,6 @@ namespace
     // Constrain to [0, UINT64_MAX - 1'000'000]
     const uint64_t max_allowed = std::numeric_limits<uint64_t>::max() - 1000000ull;
     return h % (max_allowed + 1ull);
-  }
-  bool storage_fees(const SenderDataType &sender, const uint64_t &storage_size)
-  {
-    uint256_t storage_fee = get_fee("STORAGE_FEE") * storage_size;
-    uint256_t usd_equiv;
-
-    if(!zera_fees::get_cur_equiv(NETWORK_CONTRACT, usd_equiv))
-    {
-      return false;
-    }
-    storage_fee = (storage_fee * 1000000000) / usd_equiv;
-
-    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, NETWORK_CONTRACT, storage_fee, sender.txn_hash);
-
-    if (!status.ok())
-    {
-      return false;
-    }
-
-    std::string storage_key = "STORAGE_FEE_" + sender.fee_smart_contract_instance;
-
-    std::string fee_data;
-
-    if (db_smart_contracts::get_single(storage_key, fee_data))
-    {
-      uint256_t fee(fee_data);
-      storage_fee += fee;
-    }
-
-    db_smart_contracts::store_single(storage_key, storage_fee.str());
-
-    return true;
   }
 }
 
@@ -428,7 +397,6 @@ int parse_and_store_inputs(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryInstanceCon
 
   return pointer_of_pointers;
 }
-
 
 std::vector<std::string> getWords(std::string s, std::string delim)
 {
@@ -771,12 +739,14 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
     std::string ContractNameString((char *)ContractName);
     std::string InstanceString((char *)Instance);
     std::string instance_name = ContractNameString + "_" + InstanceString;
+    logging::print("instance_name:", instance_name, true);
     //
     std::string raw_data;
     db_smart_contracts::get_single(instance_name, raw_data);
     //
     if (raw_data.empty())
     {
+      logging::print("Error: no smart contract found:", instance_name, true);
       return WasmEdge_Result_Fail;
     }
     //
@@ -873,8 +843,6 @@ WasmEdge_Result Emit(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Value.data(), ValuePointer, ValueSize);
   if (WasmEdge_ResultOK(Res))
   {
-    // SenderDataType sender = *(SenderDataType *)Data;
-
     std::string valueString(reinterpret_cast<char *>(Value.data()), ValueSize);
 
     uint64_t storage_fee = ValueSize;
@@ -966,7 +934,6 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_DelegateRetrieveState, sizeof(ParamList_DelegateRetrieveState) / sizeof(ParamList_DelegateRetrieveState[0]),
                      ReturnList_DelegateRetrieveState, sizeof(ReturnList_DelegateRetrieveState) / sizeof(ReturnList_DelegateRetrieveState[0]),
                      DelegateRetrieveState, "delegate_retrieve_state");
-  
 
   // add "clear_state" function
   enum WasmEdge_ValType ParamList_ClearState[2] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32};
@@ -1367,17 +1334,141 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_Hash, sizeof(ParamList_Hash) / sizeof(ParamList_Hash[0]),
                      ReturnList_Hash, sizeof(ReturnList_Hash) / sizeof(ReturnList_Hash[0]),
                      Hash, "hash");
-                
+
   // Send Multi
-  enum WasmEdge_ValType ParamList_SendMulti[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, 
-    WasmEdge_ValType_I32, WasmEdge_ValType_I32, 
-    WasmEdge_ValType_I32, WasmEdge_ValType_I32, 
-    WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ParamList_SendMulti[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                  WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                  WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                  WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_SendMulti[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
                      ParamList_SendMulti, sizeof(ParamList_SendMulti) / sizeof(ParamList_SendMulti[0]),
                      ReturnList_SendMulti, sizeof(ReturnList_SendMulti) / sizeof(ReturnList_SendMulti[0]),
                      SendMulti, "send_multi");
+
+  // Transfer Multi
+  enum WasmEdge_ValType ParamList_TransferMulti[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                      WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                      WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                      WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_TransferMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_TransferMulti, sizeof(ParamList_TransferMulti) / sizeof(ParamList_TransferMulti[0]),
+                     ReturnList_TransferMulti, sizeof(ReturnList_TransferMulti) / sizeof(ReturnList_TransferMulti[0]),
+                     TransferMulti, "transfer_multi");
+
+  // Derive Wallets
+  enum WasmEdge_ValType ParamList_DeriveWallet[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DeriveWallet[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DeriveWallet, sizeof(ParamList_DeriveWallet) / sizeof(ParamList_DeriveWallet[0]),
+                     ReturnList_DeriveWallet, sizeof(ReturnList_DeriveWallet) / sizeof(ReturnList_DeriveWallet[0]),
+                     DeriveWallet, "derive_wallet");
+
+  enum WasmEdge_ValType ParamList_DeriveWalletCurrent[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DeriveWalletCurrent[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DeriveWalletCurrent, sizeof(ParamList_DeriveWalletCurrent) / sizeof(ParamList_DeriveWalletCurrent[0]),
+                     ReturnList_DeriveWalletCurrent, sizeof(ReturnList_DeriveWalletCurrent) / sizeof(ReturnList_DeriveWalletCurrent[0]),
+                     DeriveWalletCurrent, "derive_wallet_current");
+
+  enum WasmEdge_ValType ParamList_DeriveWalletDelegate[7] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DeriveWalletDelegate[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DeriveWalletDelegate, sizeof(ParamList_DeriveWalletDelegate) / sizeof(ParamList_DeriveWalletDelegate[0]),
+                     ReturnList_DeriveWalletDelegate, sizeof(ReturnList_DeriveWalletDelegate) / sizeof(ReturnList_DeriveWalletDelegate[0]),
+                     DeriveWalletDelegate, "derive_wallet_delegate");
+
+  // DERIVE SEND
+  enum WasmEdge_ValType ParamList_DerivedSend[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                    WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                    WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedSend[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedSend, sizeof(ParamList_DerivedSend) / sizeof(ParamList_DerivedSend[0]),
+                     ReturnList_DerivedSend, sizeof(ReturnList_DerivedSend) / sizeof(ReturnList_DerivedSend[0]),
+                     DerivedSend, "derived_send");
+
+  enum WasmEdge_ValType ParamList_DerivedDelegateSend[13] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedDelegateSend[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedDelegateSend, sizeof(ParamList_DerivedDelegateSend) / sizeof(ParamList_DerivedDelegateSend[0]),
+                     ReturnList_DerivedDelegateSend, sizeof(ReturnList_DerivedDelegateSend) / sizeof(ReturnList_DerivedDelegateSend[0]),
+                     DerivedDelegateSend, "derived_delegate_send");
+
+  enum WasmEdge_ValType ParamList_DerivedCurrentSend[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedCurrentSend[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedCurrentSend, sizeof(ParamList_DerivedCurrentSend) / sizeof(ParamList_DerivedCurrentSend[0]),
+                     ReturnList_DerivedCurrentSend, sizeof(ReturnList_DerivedCurrentSend) / sizeof(ReturnList_DerivedCurrentSend[0]),
+                     DerivedCurrentSend, "derived_current_send");
+
+  enum WasmEdge_ValType ParamList_DerivedSendAll[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                       WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedSendAll[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedSendAll, sizeof(ParamList_DerivedSendAll) / sizeof(ParamList_DerivedSendAll[0]),
+                     ReturnList_DerivedSendAll, sizeof(ReturnList_DerivedSendAll) / sizeof(ReturnList_DerivedSendAll[0]),
+                     DerivedSendAll, "derived_send_all");
+
+  enum WasmEdge_ValType ParamList_DerivedDelegateSendAll[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedDelegateSendAll[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedDelegateSendAll, sizeof(ParamList_DerivedDelegateSendAll) / sizeof(ParamList_DerivedDelegateSendAll[0]),
+                     ReturnList_DerivedDelegateSendAll, sizeof(ReturnList_DerivedDelegateSendAll) / sizeof(ReturnList_DerivedDelegateSendAll[0]),
+                     DerivedDelegateSendAll, "derived_delegate_send_all");
+
+  enum WasmEdge_ValType ParamList_DerivedCurrentSendAll[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                              WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedCurrentSendAll[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedCurrentSendAll, sizeof(ParamList_DerivedCurrentSendAll) / sizeof(ParamList_DerivedCurrentSendAll[0]),
+                     ReturnList_DerivedCurrentSendAll, sizeof(ReturnList_DerivedCurrentSendAll) / sizeof(ReturnList_DerivedCurrentSendAll[0]),
+                     DerivedCurrentSendAll, "derived_current_send_all");
+
+  enum WasmEdge_ValType ParamList_InstrumentContractDEX[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                              WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                              WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                              WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_InstrumentContractDEX[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_InstrumentContractDEX, sizeof(ParamList_InstrumentContractDEX) / sizeof(ParamList_InstrumentContractDEX[0]),
+                     ReturnList_InstrumentContractDEX, sizeof(ReturnList_InstrumentContractDEX) / sizeof(ReturnList_InstrumentContractDEX[0]),
+                     InstrumentContractDEX, "instrument_contract_dex");
+
+  enum WasmEdge_ValType ParamList_SmartContractExists[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                              WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_SmartContractExists[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_SmartContractExists, sizeof(ParamList_SmartContractExists) / sizeof(ParamList_SmartContractExists[0]),
+                     ReturnList_SmartContractExists, sizeof(ReturnList_SmartContractExists) / sizeof(ReturnList_SmartContractExists[0]),
+                     SmartContractExists, "smart_contract_exists");
+
+  enum WasmEdge_ValType ParamList_WalletExists[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_WalletExists[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_WalletExists, sizeof(ParamList_WalletExists) / sizeof(ParamList_WalletExists[0]),
+                     ReturnList_WalletExists, sizeof(ReturnList_WalletExists) / sizeof(ReturnList_WalletExists[0]),
+                     WalletExists, "wallet_exists");
+
+  enum WasmEdge_ValType ParamList_DerivedSendMulti[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedSendMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedSendMulti, sizeof(ParamList_DerivedSendMulti) / sizeof(ParamList_DerivedSendMulti[0]),
+                     ReturnList_DerivedSendMulti, sizeof(ReturnList_DerivedSendMulti) / sizeof(ReturnList_DerivedSendMulti[0]),
+                     DerivedSendMulti, "derived_send_multi");
+
   return HostModCxt;
 }
 
@@ -1589,8 +1680,8 @@ std::vector<std::any> smart_contract_service::run(std::string smart_contract_ins
 
     uint64_t TotalCosts = WasmEdge_StatisticsGetTotalCost(StatCxt);
     used_gas = TotalCosts + sender.gas_used;
-    logging::print("[run] TotalCost (GasCosts):", std::to_string(TotalCosts), true);
-    logging::print("[run] TotalCosts + sender.gas_used:", std::to_string(used_gas), true);
+    logging::print("[run] Panic TotalCost (GasCosts):", std::to_string(TotalCosts), true);
+    logging::print("[run] Panic TotalCosts + sender.gas_used:", std::to_string(used_gas), true);
     throw std::runtime_error("Error: wasmInstantiateAndExecute");
   }
 
@@ -1648,7 +1739,10 @@ std::vector<std::any> smart_contract_service::eval(
     const uint64_t &gas_limit,
     uint64_t &used_gas,
     std::vector<std::string> &txn_hashes,
-    std::map<std::string, std::string>& derived_wallets)
+    std::map<std::string, std::string> &derived_wallets,
+    const bool &sc_fees,
+    const std::string &fee_id
+  )
 {
   // store sender's data
   sender.pub_key = sender_pub_key;
@@ -1661,7 +1755,17 @@ std::vector<std::any> smart_contract_service::eval(
   sender.block_txns_key = block_txns_key;
   sender.fee_address = fee_address;
   sender.smart_contract_wallet = smart_contract_wallet;
-  sender.fee_smart_contract_wallet = smart_contract_wallet;
+  sender.fee_id = fee_id;
+
+  if (sc_fees)
+  {
+    sender.fee_smart_contract_wallet = smart_contract_wallet;
+  }
+  else
+  {
+    sender.fee_smart_contract_wallet = sender_wallet_address;
+  }
+
   sender.max_depth = 50;
   sender.current_depth = 0;
   sender.emited.clear();
@@ -1672,6 +1776,7 @@ std::vector<std::any> smart_contract_service::eval(
   sender.gas_available = gas_limit;
   sender.gas_used = 0;
   sender.txn_hashes.clear();
+  sender.derived_wallets.clear();
 
   zera_validator::BlockHeader block_header;
   std::string key;
@@ -1703,7 +1808,9 @@ std::vector<std::any> smart_contract_service::eval(
   {
     results.insert(results.begin(), sender.emited[i]);
   }
-  
+
+  logging::print("[eval] txn_hashes size:", std::to_string(txn_hashes.size()), true);
+
   derived_wallets = sender.derived_wallets;
 
   return results;

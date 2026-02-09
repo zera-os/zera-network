@@ -200,6 +200,70 @@ namespace
         ValidatorNetworkClient::StartGossip(heartbeat);
         delete heartbeat;
     }
+
+        std::string create_validator_block(zera_txn::ValidatorRegistration &registration_message)
+    {
+        zera_validator::Block block;
+        zera_txn::ValidatorRegistration *registration = block.mutable_transactions()->add_validator_registration_txns();
+        registration->CopyFrom(registration_message);
+        zera_validator::BlockHeader *header = block.mutable_block_header();
+        google::protobuf::Timestamp *ts = header->mutable_timestamp();
+        google::protobuf::Timestamp now_ts = google::protobuf::util::TimeUtil::GetCurrentTime();
+
+        ts->set_seconds(now_ts.seconds());
+        ts->set_nanos(now_ts.nanos());
+        std::string last_key;
+        zera_validator::BlockHeader last_header;
+        db_headers_tag::get_last_data(last_header, last_key);
+
+        header->set_previous_block_hash(last_header.hash());
+        header->set_block_height(last_header.block_height() + 1);
+        header->set_version(ValidatorConfig::get_version());
+        registration->mutable_validator()->set_last_heartbeat(header->block_height());
+        zera_txn::TXNStatusFees *status_fees = block.mutable_transactions()->add_txn_fees_and_status();
+        status_fees->set_base_contract_id(NETWORK_CONTRACT);
+        status_fees->set_contract_fees("0");
+        status_fees->set_base_fees("0");
+        status_fees->set_status(zera_txn::TXN_STATUS::OK);
+        status_fees->set_txn_hash(registration_message.base().hash());
+
+        uint64_t nonce = registration_message.base().nonce() + 1;
+        zera_txn::ValidatorHeartbeat *heartbeat = block.mutable_transactions()->add_validator_heartbeat_txns();
+        create_heartbeat(*heartbeat, nonce);
+
+        zera_txn::TXNStatusFees *status_fees2 = block.mutable_transactions()->add_txn_fees_and_status();
+        status_fees2->set_base_contract_id(NETWORK_CONTRACT);
+        status_fees2->set_contract_fees("0");
+        status_fees2->set_base_fees("0");
+        status_fees2->set_status(zera_txn::TXN_STATUS::OK);
+        status_fees2->set_txn_hash(heartbeat->base().hash());
+
+        merkle_tree::build_merkle_tree(&block);
+
+        signatures::sign_block_proposer(&block, ValidatorConfig::get_gen_key_pair());
+        std::vector<uint8_t> hash = Hashing::sha256_hash(block.SerializeAsString());
+        std::string hash_str(hash.begin(), hash.end());
+        header->set_hash(hash_str);
+
+        std::string wallet_address = wallets::generate_wallet_single(ValidatorConfig::get_public_key());
+        nonce_tracker::add_used_nonce(wallet_address, registration_message.base().nonce());
+        nonce_tracker::add_used_nonce(wallet_address, heartbeat->base().nonce());
+
+        std::string write_block;
+        std::string write_header;
+
+        std::string key = block_utils::block_to_write(&block, write_block, write_header);
+
+        // Store data in database
+        db_blocks::store_single(key, write_block);
+        db_headers::store_single(key, write_header);
+        db_hash_index::store_single(block.block_header().hash(), key);
+        db_hash_index::store_single(std::to_string(block.block_header().block_height()), key);
+
+        block_process::store_txns(&block, true);
+        return hash_str;
+    }
+
 }
 
 bool startup_config::configure_startup()
@@ -284,7 +348,6 @@ bool startup_config::configure_startup()
         zera_validator::BlockHeader header;
         std::string key;
         db_headers_tag::get_last_data(header, key);
-        Reorg::checkpoint_blockchain("vtest", header);
     }
 
     if (!sync && ValidatorConfig::get_register() != "reset")
@@ -300,6 +363,7 @@ bool startup_config::configure_startup()
 
     if (!heartbeat && ValidatorConfig::get_register() != "reset")
     {
+        create_validator_block(registration_message);
         validator_utils::archive_balances(last_height);
     }
 

@@ -8,38 +8,30 @@
 #include "smart_contract_sender_data.h"
 #include "fees.h"
 #include "validators.h"
+#include "logging.h"
+#include "nf_helpers.h"
 
 namespace
 {
-  bool storage_fees(const SenderDataType &sender, const uint64_t &storage_size)
+
+  bool is_valid_smart_contract_key(const std::string &key)
   {
-    uint256_t storage_fee = get_fee("STORAGE_FEE") * storage_size;
-
-    uint256_t usd_equiv;
-    zera_fees::get_cur_equiv(NETWORK_CONTRACT, usd_equiv);
-    storage_fee = (storage_fee * 1000000000) / usd_equiv;
-
-    ZeraStatus status = balance_tracker::subtract_txn_balance(sender.fee_smart_contract_wallet, NETWORK_CONTRACT, storage_fee, sender.txn_hash);
-
-    if (!status.ok())
+    if (key.empty())
     {
       return false;
     }
 
-    std::string storage_key = "STORAGE_FEE_" + sender.fee_smart_contract_instance;
-
-    std::string fee_data;
-
-    if (db_smart_contracts::get_single(storage_key, fee_data))
+    for (char c : key)
     {
-      uint256_t fee(fee_data);
-      storage_fee += fee;
+      if(c == '<' || c == '>')
+      {
+        return false;
+      }
     }
-
-    db_smart_contracts::store_single(storage_key, storage_fee.str());
 
     return true;
   }
+
 }
 WasmEdge_Result StoreState(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                            const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -66,14 +58,26 @@ WasmEdge_Result StoreState(void *Data, const WasmEdge_CallingFrameContext *CallF
   {
     if (WasmEdge_ResultOK(Res2))
     {
-      SenderDataType sender = *(SenderDataType *)Data;
+      SenderDataType *sender = (SenderDataType *)Data;
       std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
+      if (!is_valid_smart_contract_key(keyString))
+      {
+        logging::print("Invalid smart contract key: " + keyString, true);
+        return WasmEdge_Result_Terminate;
+      }
 
-      std::string storeKey = sender.current_smart_contract_instance + "_" + keyString;
-
+      std::string storeKey = sender->current_smart_contract_instance + "<>" + keyString;
       std::string storage_data;
-      db_smart_contracts::get_single(storeKey, storage_data);
 
+      if (!db_smart_contract_states::get_single(storeKey, storage_data))
+      {
+        std::string original_store_key = sender->current_smart_contract_instance + "_" + keyString;
+        if (db_smart_contracts::get_single(original_store_key, storage_data))
+        {
+          db_smart_contracts::remove_single(original_store_key);
+          db_smart_contract_states::store_single(storeKey, storage_data);
+        }
+      }
       uint64_t size = KeySize + ValueSize;
       uint64_t storage_fee;
 
@@ -86,7 +90,7 @@ WasmEdge_Result StoreState(void *Data, const WasmEdge_CallingFrameContext *CallF
         storage_fee = 0;
       }
 
-      if (storage_fee > 0 && !storage_fees(sender, storage_fee))
+      if (storage_fee > 0 && !storage_fees(*sender, storage_fee))
       {
         logging::print("Storage fees check failed for sender: " + storeKey, true);
         return WasmEdge_Result_Terminate;
@@ -97,12 +101,13 @@ WasmEdge_Result StoreState(void *Data, const WasmEdge_CallingFrameContext *CallF
       if (!db_sc_temp::exist(storeKey))
       {
         std::string original_data;
-        db_smart_contracts::get_single(storeKey, original_data);
+        // db_smart_contracts::get_single(storeKey, original_data);
+        db_smart_contract_states::store_single(storeKey, original_data);
         db_sc_temp::store_single(storeKey, original_data);
       }
       logging::print("[StoreState] Storing key: ", storeKey, true);
       logging::print("[StoreState] Value: ", valueString, true);
-      db_smart_contracts::store_single(storeKey, valueString);
+      db_smart_contract_states::store_single(storeKey, valueString);
 
       int value = 1;
       Out[0] = WasmEdge_ValueGenI32(value);
@@ -150,16 +155,21 @@ WasmEdge_Result DelegateStoreState(void *Data, const WasmEdge_CallingFrameContex
     {
       if (WasmEdge_ResultOK(Res3))
       {
-        SenderDataType sender = *(SenderDataType *)Data;
+        SenderDataType *sender = (SenderDataType *)Data;
 
         std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
         std::string delegate_key = delegate_keyString;
 
         std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
 
-        bool in_call_chain = false;
+        if (!is_valid_smart_contract_key(keyString))
+        {
+          logging::print("Invalid delegate smart contract key: " + keyString, true);
+          return WasmEdge_Result_Terminate;
+        }
 
-        for (auto &call : sender.call_chain)
+        bool in_call_chain = false;
+        for (auto &call : sender->call_chain)
         {
           if (call == delegate_key)
           {
@@ -173,10 +183,18 @@ WasmEdge_Result DelegateStoreState(void *Data, const WasmEdge_CallingFrameContex
           return WasmEdge_Result_Terminate;
         }
 
-        std::string storeKey = delegate_key + "_" + keyString;
-
+        std::string storeKey = delegate_key + "<>" + keyString;
         std::string storage_data;
-        db_smart_contracts::get_single(storeKey, storage_data);
+
+        if (!db_smart_contract_states::get_single(storeKey, storage_data))
+        {
+          std::string original_store_key = delegate_key + "_" + keyString;
+          if (db_smart_contracts::get_single(original_store_key, storage_data))
+          {
+            db_smart_contracts::remove_single(original_store_key);
+            db_smart_contract_states::store_single(storeKey, storage_data);
+          }
+        }
 
         uint64_t size = KeySize + ValueSize;
         uint64_t storage_fee;
@@ -190,7 +208,7 @@ WasmEdge_Result DelegateStoreState(void *Data, const WasmEdge_CallingFrameContex
           storage_fee = 0;
         }
 
-        if (storage_fee > 0 && !storage_fees(sender, storage_fee))
+        if (storage_fee > 0 && !storage_fees(*sender, storage_fee))
         {
           logging::print("Storage fees check failed for sender: " + storeKey, true);
           return WasmEdge_Result_Terminate;
@@ -201,13 +219,13 @@ WasmEdge_Result DelegateStoreState(void *Data, const WasmEdge_CallingFrameContex
         if (!db_sc_temp::exist(storeKey))
         {
           std::string original_data;
-          db_smart_contracts::get_single(storeKey, original_data);
+          db_smart_contract_states::get_single(storeKey, original_data);
           db_sc_temp::store_single(storeKey, original_data);
         }
         logging::print("[DelegateStoreState] Storing key: ", storeKey, true);
         logging::print("[DelegateStoreState] Value: ", valueString, true);
 
-        db_smart_contracts::store_single(storeKey, valueString);
+        db_smart_contract_states::store_single(storeKey, valueString);
 
         int value = 1;
         Out[0] = WasmEdge_ValueGenI32(value);
@@ -248,18 +266,24 @@ WasmEdge_Result RetrieveState(void *Data, const WasmEdge_CallingFrameContext *Ca
   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Key.data(), KeyPointer, KeySize);
   if (WasmEdge_ResultOK(Res))
   {
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     // retrieve Value by Key
     //
     std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
 
-    std::string storeKey = sender.current_smart_contract_instance + "_" + keyString;
-    logging::print("[RetrieveState] Store key: ", storeKey, true);
+    std::string storeKey = sender->current_smart_contract_instance + "<>" + keyString;
     std::string raw_data;
-    db_smart_contracts::get_single(storeKey, raw_data);
 
-    logging::print("[RetrieveState] Raw data: ", raw_data, true);
+    if (!db_smart_contract_states::get_single(storeKey, raw_data))
+    {
+      std::string original_store_key = sender->current_smart_contract_instance + "_" + keyString;
+      if (db_smart_contracts::get_single(original_store_key, raw_data))
+      {
+        db_smart_contracts::remove_single(original_store_key);
+        db_smart_contract_states::store_single(storeKey, raw_data);
+      }
+    }
 
     const char *val = raw_data.c_str();
     const size_t len = raw_data.length();
@@ -297,12 +321,11 @@ WasmEdge_Result DelegateRetrieveState(void *Data, const WasmEdge_CallingFrameCon
   std::string key;
   if (WasmEdge_ResultOK(Res))
   {
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
 
     key = keyString;
-    logging::print("[DelegateRetrieveState] Key: ", key, true);
   }
   else
   {
@@ -315,18 +338,24 @@ WasmEdge_Result DelegateRetrieveState(void *Data, const WasmEdge_CallingFrameCon
   {
     std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
     delegate_key = delegate_keyString;
-    logging::print("[DelegateRetrieveState] Delegate key: ", delegate_key, true);
   }
   else
   {
     return Res2;
   }
 
+  std::string storeKey = delegate_key + "<>" + key;
   std::string raw_data;
-  std::string storeKey = delegate_key + "_" + key;
-  db_smart_contracts::get_single(storeKey, raw_data);
 
-  logging::print("[DelegateRetrieveState] Raw data: ", raw_data, true);
+  if (!db_smart_contract_states::get_single(storeKey, raw_data))
+  {
+    std::string original_store_key = delegate_key + "_" + key;
+    if (db_smart_contracts::get_single(original_store_key, raw_data))
+    {
+      db_smart_contracts::remove_single(original_store_key);
+      db_smart_contract_states::store_single(storeKey, raw_data);
+    }
+  }
 
   const char *val = raw_data.c_str();
   const size_t len = raw_data.length();
@@ -356,19 +385,28 @@ WasmEdge_Result ClearState(void *Data, const WasmEdge_CallingFrameContext *CallF
   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Key.data(), KeyPointer, KeySize);
   if (WasmEdge_ResultOK(Res))
   {
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
     // store Key and Value
     std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
-    std::string storeKey = sender.current_smart_contract_instance + "_" + keyString;
+    std::string originalstoreKey = sender->current_smart_contract_instance + "_" + keyString;
+    std::string storeKey = sender->current_smart_contract_instance + "<>" + keyString;
 
     if (!db_sc_temp::exist(storeKey))
     {
       std::string original_data;
-      db_smart_contracts::get_single(storeKey, original_data);
+      db_smart_contract_states::get_single(storeKey, original_data);
       db_sc_temp::store_single(storeKey, original_data);
     }
 
-    db_smart_contracts::remove_single(storeKey);
+    if (!db_sc_temp::exist(originalstoreKey))
+    {
+      std::string original_data;
+      db_smart_contracts::get_single(originalstoreKey, original_data);
+      db_sc_temp::store_single(originalstoreKey, original_data);
+    }
+
+    db_smart_contracts::remove_single(originalstoreKey);
+    db_smart_contract_states::remove_single(storeKey);
 
     return WasmEdge_Result_Success;
   }
@@ -404,7 +442,7 @@ WasmEdge_Result DelegateClearState(void *Data, const WasmEdge_CallingFrameContex
     if (WasmEdge_ResultOK(Res2))
     {
 
-      SenderDataType sender = *(SenderDataType *)Data;
+      SenderDataType *sender = (SenderDataType *)Data;
 
       std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
       std::string delegate_key = delegate_keyString;
@@ -412,31 +450,39 @@ WasmEdge_Result DelegateClearState(void *Data, const WasmEdge_CallingFrameContex
 
       bool in_call_chain = false;
 
-        for (auto &call : sender.call_chain)
+      for (auto &call : sender->call_chain)
+      {
+        if (call == delegate_key)
         {
-          if (call == delegate_key)
-          {
-            in_call_chain = true;
-            break;
-          }
+          in_call_chain = true;
+          break;
         }
+      }
 
-        if (!in_call_chain)
-        {
-          return WasmEdge_Result_Terminate;
-        }
+      if (!in_call_chain)
+      {
+        return WasmEdge_Result_Terminate;
+      }
 
-        std::string storeKey = delegate_key + "_" + keyString;
-
+      std::string storeKey = delegate_key + "<>" + keyString;
+      std::string originalstoreKey = delegate_key + "_" + keyString;
 
       if (!db_sc_temp::exist(storeKey))
       {
         std::string original_data;
-        db_smart_contracts::get_single(storeKey, original_data);
+        db_smart_contract_states::get_single(storeKey, original_data);
         db_sc_temp::store_single(storeKey, original_data);
       }
 
-      db_smart_contracts::remove_single(storeKey);
+      if (!db_sc_temp::exist(originalstoreKey))
+      {
+        std::string original_data;
+        db_smart_contracts::get_single(originalstoreKey, original_data);
+        db_sc_temp::store_single(originalstoreKey, original_data);
+      }
+
+      db_smart_contracts::remove_single(originalstoreKey);
+      db_smart_contract_states::remove_single(storeKey);
 
       return WasmEdge_Result_Success;
     }
@@ -450,3 +496,49 @@ WasmEdge_Result DelegateClearState(void *Data, const WasmEdge_CallingFrameContex
     return Res;
   }
 }
+
+// WasmEdge_Result GetAllStates(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
+// {
+//   uint32_t DelegateKeyPointer = WasmEdge_ValueGetI32(In[0]);
+//   uint32_t DelegateKeySize = WasmEdge_ValueGetI32(In[1]);
+//   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
+
+//   std::vector<unsigned char> DelegateKey(DelegateKeySize);
+
+//   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+//   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateKey.data(), DelegateKeyPointer, DelegateKeySize);
+//   std::string delegate_key;
+//   if (WasmEdge_ResultOK(Res))
+//   {
+//     std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
+//     delegate_key = delegate_keyString;
+//   }
+//   else
+//   {
+//     return Res;
+//   }
+
+//   std::vector<std::string> keys;
+//   std::vector<std::string> values;
+//   std::string return_data;
+
+//   if(db_smart_contracts::find_by_prefix(delegate_key + "_", keys, values) < 1)
+//   {
+//     return_data = "";
+//   }
+//   else
+//   {
+//     for(size_t i = 0; i < keys.size(); i++)
+//     {
+//       return_data += keys[i] + "\n" + values[i] + "\n";
+//     }
+//   }
+
+//   const char *val = return_data.c_str();
+//   const size_t len = return_data.length();
+
+//   WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+//   Out[0] = WasmEdge_ValueGenI32(len);
+
+//   return WasmEdge_Result_Success;
+// }

@@ -16,8 +16,11 @@ grpc::Status APIImpl::RecieveRequestBaseFee(grpc::ServerContext *context, const 
 
     uint256_t key_fee = get_key_fee(request->public_key());
 
+    uint256_t new_wallet_fee = get_fee(FIRST_TIME_WALLET_FEE);
+
     response->set_byte_fee(byte_fee.str());
     response->set_key_fee(key_fee.str());
+    response->set_new_wallet_fee(new_wallet_fee.str());
 
     return grpc::Status::OK;
 }

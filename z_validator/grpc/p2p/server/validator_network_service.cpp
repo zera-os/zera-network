@@ -93,3 +93,8 @@ grpc::Status ValidatorServiceImpl::ValidatorAllowance(grpc::ServerContext *conte
 {
     return RecieveRequest(context, request, response);
 }
+
+grpc::Status ValidatorServiceImpl::ValidatorProposalCancel(grpc::ServerContext *context, const zera_txn::ProposalCancelTXN *request, google::protobuf::Empty *response)
+{
+    return RecieveRequest(context, request, response);
+}

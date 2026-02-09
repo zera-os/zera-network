@@ -279,13 +279,14 @@ void ValidatorNetworkClient::CheckAttestations(std::shared_ptr<zera_validator::B
 
         if (my_hash != block_support_vec[0].first)
         {
-            logging::print("ATTEMPTING REORG");
-            Reorg::reorg_blockchain();
 
             if(ValidatorConfig::get_shutdown())
             {
+                logging::print("SHUTDOWN DETECTED");
                 return;
             }
+            logging::print("ATTEMPTING REORG");
+            Reorg::reorg_blockchain();
             
             ValidatorAPIClient::ClearPendingEventsForBlock(request->block_height());
         }

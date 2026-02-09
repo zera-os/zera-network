@@ -21,6 +21,7 @@ template ZeraStatus verify_txns::verify_txn<zera_txn::CoinTXN>(const zera_txn::C
 template ZeraStatus verify_txns::verify_txn<zera_txn::SmartContractInstantiateTXN>(const zera_txn::SmartContractInstantiateTXN *txn);
 template ZeraStatus verify_txns::verify_txn<zera_txn::RequiredVersion>(const zera_txn::RequiredVersion *txn);
 template ZeraStatus verify_txns::verify_txn<zera_txn::AllowanceTXN>(const zera_txn::AllowanceTXN *txn);
+template ZeraStatus verify_txns::verify_txn<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *txn);
 
 template <>
 void verify_txns::store_wrapper<zera_txn::MintTXN>(const zera_txn::MintTXN *txn, zera_txn::TXNWrapper &wrapper)
@@ -162,6 +163,13 @@ void verify_txns::store_wrapper<zera_txn::AllowanceTXN>(const zera_txn::Allowanc
 {
     wrapper.mutable_allowance_txn()->CopyFrom(*txn);
     wrapper.set_txn_type(zera_txn::TRANSACTION_TYPE::ALLOWANCE_TYPE);
+}
+
+template <>
+void verify_txns::store_wrapper<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *txn, zera_txn::TXNWrapper &wrapper)
+{
+    wrapper.mutable_proposal_cancel_txn()->CopyFrom(*txn);
+    wrapper.set_txn_type(zera_txn::TRANSACTION_TYPE::PROPOSAL_CANCEL_TYPE);
 }
 
 template <typename TXType>

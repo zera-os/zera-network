@@ -17,7 +17,7 @@ namespace
 
         auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
 
-        zera_fees::process_fees(contract, fees, wallet_adr, NETWORK_CONTRACT, true, status_fees, txn->base().hash(), fee_address, true);
+        zera_fees::process_fees(contract, fees, wallet_adr, txn->base().fee_id(), true, status_fees, txn->base().hash(), fee_address, true);
     }
 
     ZeraStatus gas_fees(const zera_txn::SmartContractInstantiateTXN *txn, const uint64_t &used_gas, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
@@ -146,7 +146,7 @@ namespace
                                          txn->base().hash(), timestamp,
                                          block_txns_key, fee_address,
                                          smart_contract_wallet, gas_approved,
-                                         used_gas, txn_hashes, derived_wallets);
+                                         used_gas, txn_hashes, derived_wallets, db_contract.sc_fees(), txn->base().fee_id());
 
             nonce_tracker::add_sc_to_used_nonce();
             txn_hash_tracker::add_sc_to_hash();
@@ -157,19 +157,22 @@ namespace
             {
                 for(const auto& [key, value] : derived_wallets)
                 {
+                    std::string db_key = value;
+                    std::string db_value = key;
                     std::string temp_value;
                     zera_wallets::DerivedWallets derived_wallet;
-                    db_smart_contracts::get_single(key, temp_value);
+                    db_smart_contract_states::get_single(db_key, temp_value);
                     derived_wallet.ParseFromString(temp_value);
 
-                    derived_wallet.mutable_wallets()->insert({value, true});
-                    db_smart_contracts::store_single(key, derived_wallet.SerializeAsString());
-                    logging::print("[ProcessSmartContractInstantiate] Storing derived wallet:", key, "->", value);
+                    derived_wallet.mutable_wallets()->insert({db_value, true});
+                    db_smart_contract_states::store_single(db_key, derived_wallet.SerializeAsString());
+                    logging::print("[ProcessSmartContractExecute] Storing derived wallet:", db_key, "->", db_value, true);
                 }
             }
         }
         catch (...)
         {
+
 
             nonce_tracker::clear_sc_nonce();
             txn_hash_tracker::clear_sc_txn_hash();
@@ -191,10 +194,11 @@ namespace
                 if (values[x].empty())
                 {
                     db_smart_contracts::remove_single(key);
+                    db_smart_contract_states::remove_single(key);
                 }
                 else
                 {
-                    db_smart_contracts::store_single(key, values[x]);
+                    db_smart_contract_states::store_single(key, values[x]);
                 }
                 x++;
             }
@@ -212,7 +216,7 @@ template <>
 ZeraStatus block_process::process_txn<zera_txn::SmartContractInstantiateTXN>(const zera_txn::SmartContractInstantiateTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
 {
     logging::print("[ProcessSmartContractInstantiate] instantiating smart contract...", txn->smart_contract_name());
-    logging::print("instance:", txn->instance());
+    logging::print("instance:", std::to_string(txn->instance()), true);
 
     uint64_t nonce = txn->base().nonce();
     ZeraStatus status;

@@ -64,6 +64,11 @@ const char *const db_sc_temp_tag::DB_NAME = "sc_temp";
 const char *const db_allowance_tag::DB_NAME = "allowance";
 const char *const db_sc_subscriber_tag::DB_NAME = "sc_subscriber";
 const char *const db_event_management_tag::DB_NAME = "event_management";
+const char *const db_staked_coins_voted_temp_tag::DB_NAME = "staked_coins_voted_temp";
+const char *const db_staked_coins_voted_tag::DB_NAME = "staked_coins_voted";
+const char *const db_fee_tokens_tag::DB_NAME = "fee_tokens";
+const char *const db_fee_tokens_temp_tag::DB_NAME = "fee_tokens_temp";
+const char *const db_smart_contract_states_tag::DB_NAME = "smart_contract_states";
 
 template <typename T>
 rocksdb::DB *db_base<T>::db = nullptr;
@@ -131,6 +136,11 @@ template int db_base<db_sc_temp_tag>::open_db();
 template int db_base<db_allowance_tag>::open_db();
 template int db_base<db_sc_subscriber_tag>::open_db();
 template int db_base<db_event_management_tag>::open_db();
+template int db_base<db_staked_coins_voted_temp_tag>::open_db();
+template int db_base<db_staked_coins_voted_tag>::open_db();
+template int db_base<db_fee_tokens_tag>::open_db();
+template int db_base<db_fee_tokens_temp_tag>::open_db();
+template int db_base<db_smart_contract_states_tag>::open_db();
 
 template <typename T>
 void db_base<T>::close_db()
@@ -190,6 +200,11 @@ template void db_base<db_sc_temp_tag>::close_db();
 template void db_base<db_allowance_tag>::close_db();
 template void db_base<db_sc_subscriber_tag>::close_db();
 template void db_base<db_event_management_tag>::close_db();
+template void db_base<db_staked_coins_voted_temp_tag>::close_db();
+template void db_base<db_staked_coins_voted_tag>::close_db();
+template void db_base<db_fee_tokens_tag>::close_db();
+template void db_base<db_fee_tokens_temp_tag>::close_db();
+template void db_base<db_smart_contract_states_tag>::close_db();
 
 template <typename T>
 int db_base<T>::get_single(const std::string &key, std::string &value)
@@ -249,6 +264,11 @@ template int db_base<db_sc_temp_tag>::get_single(const std::string &key, std::st
 template int db_base<db_allowance_tag>::get_single(const std::string &key, std::string &value);
 template int db_base<db_sc_subscriber_tag>::get_single(const std::string &key, std::string &value);
 template int db_base<db_event_management_tag>::get_single(const std::string &key, std::string &value);
+template int db_base<db_staked_coins_voted_temp_tag>::get_single(const std::string &key, std::string &value);
+template int db_base<db_staked_coins_voted_tag>::get_single(const std::string &key, std::string &value);
+template int db_base<db_fee_tokens_tag>::get_single(const std::string &key, std::string &value);
+template int db_base<db_fee_tokens_temp_tag>::get_single(const std::string &key, std::string &value);
+template int db_base<db_smart_contract_states_tag>::get_single(const std::string &key, std::string &value);
 
 template <typename T>
 int db_base<T>::exist(const std::string &key)
@@ -309,6 +329,11 @@ template int db_base<db_sc_temp_tag>::exist(const std::string &key);
 template int db_base<db_allowance_tag>::exist(const std::string &key);
 template int db_base<db_sc_subscriber_tag>::exist(const std::string &key);
 template int db_base<db_event_management_tag>::exist(const std::string &key);
+template int db_base<db_staked_coins_voted_temp_tag>::exist(const std::string &key);
+template int db_base<db_staked_coins_voted_tag>::exist(const std::string &key);
+template int db_base<db_fee_tokens_tag>::exist(const std::string &key);
+template int db_base<db_fee_tokens_temp_tag>::exist(const std::string &key);
+template int db_base<db_smart_contract_states_tag>::exist(const std::string &key);
 
 template <typename T>
 int db_base<T>::store_single(const std::string &key, const std::string &value)
@@ -368,6 +393,11 @@ template int db_base<db_sc_temp_tag>::store_single(const std::string &key, const
 template int db_base<db_allowance_tag>::store_single(const std::string &key, const std::string &value);
 template int db_base<db_sc_subscriber_tag>::store_single(const std::string &key, const std::string &value);
 template int db_base<db_event_management_tag>::store_single(const std::string &key, const std::string &value);
+template int db_base<db_staked_coins_voted_temp_tag>::store_single(const std::string &key, const std::string &value);
+template int db_base<db_staked_coins_voted_tag>::store_single(const std::string &key, const std::string &value);
+template int db_base<db_fee_tokens_tag>::store_single(const std::string &key, const std::string &value);
+template int db_base<db_fee_tokens_temp_tag>::store_single(const std::string &key, const std::string &value);
+template int db_base<db_smart_contract_states_tag>::store_single(const std::string &key, const std::string &value);
 
 template <typename T>
 int db_base<T>::store_batch(rocksdb::WriteBatch &batch)
@@ -427,6 +457,11 @@ template int db_base<db_sc_temp_tag>::store_batch(rocksdb::WriteBatch &batch);
 template int db_base<db_allowance_tag>::store_batch(rocksdb::WriteBatch &batch);
 template int db_base<db_sc_subscriber_tag>::store_batch(rocksdb::WriteBatch &batch);
 template int db_base<db_event_management_tag>::store_batch(rocksdb::WriteBatch &batch);
+template int db_base<db_staked_coins_voted_temp_tag>::store_batch(rocksdb::WriteBatch &batch);
+template int db_base<db_staked_coins_voted_tag>::store_batch(rocksdb::WriteBatch &batch);
+template int db_base<db_fee_tokens_tag>::store_batch(rocksdb::WriteBatch &batch);
+template int db_base<db_fee_tokens_temp_tag>::store_batch(rocksdb::WriteBatch &batch);
+template int db_base<db_smart_contract_states_tag>::store_batch(rocksdb::WriteBatch &batch);
 
 template <typename T>
 int db_base<T>::remove_single(const std::string &key)
@@ -486,6 +521,11 @@ template int db_base<db_sc_temp_tag>::remove_single(const std::string &key);
 template int db_base<db_allowance_tag>::remove_single(const std::string &key);
 template int db_base<db_sc_subscriber_tag>::remove_single(const std::string &key);
 template int db_base<db_event_management_tag>::remove_single(const std::string &key);
+template int db_base<db_staked_coins_voted_temp_tag>::remove_single(const std::string &key);
+template int db_base<db_staked_coins_voted_tag>::remove_single(const std::string &key);
+template int db_base<db_fee_tokens_tag>::remove_single(const std::string &key);
+template int db_base<db_fee_tokens_temp_tag>::remove_single(const std::string &key);
+template int db_base<db_smart_contract_states_tag>::remove_single(const std::string &key);
 
 template <typename T>
 int db_base<T>::get_all_data(std::vector<std::string> &keys, std::vector<std::string> &values)
@@ -549,6 +589,11 @@ template int db_base<db_sc_temp_tag>::get_all_data(std::vector<std::string> &val
 template int db_base<db_allowance_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
 template int db_base<db_sc_subscriber_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
 template int db_base<db_event_management_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
+template int db_base<db_staked_coins_voted_temp_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
+template int db_base<db_staked_coins_voted_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
+template int db_base<db_fee_tokens_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
+template int db_base<db_fee_tokens_temp_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
+template int db_base<db_smart_contract_states_tag>::get_all_data(std::vector<std::string> &values, std::vector<std::string> &keys);
 
 template <typename T>
 int db_base<T>::remove_all()
@@ -621,6 +666,11 @@ template int db_base<db_sc_temp_tag>::remove_all();
 template int db_base<db_allowance_tag>::remove_all();
 template int db_base<db_sc_subscriber_tag>::remove_all();
 template int db_base<db_event_management_tag>::remove_all();
+template int db_base<db_staked_coins_voted_temp_tag>::remove_all();
+template int db_base<db_staked_coins_voted_tag>::remove_all();
+template int db_base<db_fee_tokens_tag>::remove_all();
+template int db_base<db_fee_tokens_temp_tag>::remove_all();
+template int db_base<db_smart_contract_states_tag>::remove_all();
 
 template <typename T>
 int db_base<T>::compact_all()
@@ -680,6 +730,11 @@ template int db_base<db_sc_temp_tag>::compact_all();
 template int db_base<db_allowance_tag>::compact_all();
 template int db_base<db_sc_subscriber_tag>::compact_all();
 template int db_base<db_event_management_tag>::compact_all();
+template int db_base<db_staked_coins_voted_temp_tag>::compact_all();
+template int db_base<db_staked_coins_voted_tag>::compact_all();
+template int db_base<db_fee_tokens_tag>::compact_all();
+template int db_base<db_fee_tokens_temp_tag>::compact_all();
+template int db_base<db_smart_contract_states_tag>::compact_all();
 
 template <typename T>
 int db_base<T>::backup_database(const std::string &backup_path)
@@ -785,6 +840,11 @@ template int db_base<db_sc_temp_tag>::backup_database(const std::string &backup_
 template int db_base<db_allowance_tag>::backup_database(const std::string &backup_path);
 template int db_base<db_sc_subscriber_tag>::backup_database(const std::string &backup_path);
 template int db_base<db_event_management_tag>::backup_database(const std::string &backup_path);
+template int db_base<db_fee_tokens_tag>::backup_database(const std::string &backup_path);
+template int db_base<db_fee_tokens_temp_tag>::backup_database(const std::string &backup_path);
+template int db_base<db_staked_coins_voted_tag>::backup_database(const std::string &backup_path);
+template int db_base<db_staked_coins_voted_temp_tag>::backup_database(const std::string &backup_path);
+template int db_base<db_smart_contract_states_tag>::backup_database(const std::string &backup_path);
 
 template <typename T>
 int db_base<T>::checkpoint_database(const std::string &checkpoint_path)
@@ -891,6 +951,11 @@ template int db_base<db_sc_temp_tag>::checkpoint_database(const std::string &che
 template int db_base<db_allowance_tag>::checkpoint_database(const std::string &checkpoint_path);
 template int db_base<db_sc_subscriber_tag>::checkpoint_database(const std::string &checkpoint_path);
 template int db_base<db_event_management_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_fee_tokens_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_fee_tokens_temp_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_staked_coins_voted_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_staked_coins_voted_temp_tag>::checkpoint_database(const std::string &checkpoint_path);
+template int db_base<db_smart_contract_states_tag>::checkpoint_database(const std::string &checkpoint_path);
 
 template <typename T>
 int db_base<T>::restore_database(const std::string &backup_path, int code)
@@ -947,7 +1012,7 @@ int db_base<T>::restore_database(const std::string &backup_path, int code)
         if (e.code() == std::errc::no_such_file_or_directory)
         {
             // Minor: backup doesn't exist, safe to reopen
-            logging::warn("Backup not found, keeping current database");
+            logging::warn("Backup not found, opening empty database");
             open_db();
             return 1;
         }
@@ -1022,6 +1087,75 @@ template int db_base<db_sc_temp_tag>::restore_database(const std::string &backup
 template int db_base<db_allowance_tag>::restore_database(const std::string &backup_path, int code);
 template int db_base<db_sc_subscriber_tag>::restore_database(const std::string &backup_path, int code);
 template int db_base<db_event_management_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_fee_tokens_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_fee_tokens_temp_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_staked_coins_voted_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_staked_coins_voted_temp_tag>::restore_database(const std::string &backup_path, int code);
+template int db_base<db_smart_contract_states_tag>::restore_database(const std::string &backup_path, int code);
+
+template <typename T>
+int db_base<T>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values)
+{
+    return database::find_by_prefix(db, prefix, keys, values);
+}
+template int db_base<db_contracts_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_hash_index_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_wallets_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_contract_supply_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_wallets_temp_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_smart_contracts_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_block_txns_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_restricted_wallets_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_validators_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_blocks_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_headers_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_transactions_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_contract_items_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_validator_lookup_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_validator_unbond_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_proposal_ledger_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_process_ledger_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_proposals_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_status_fee_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_process_adaptive_ledger_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_expense_ratio_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_proposal_wallets_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_proposals_temp_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_delegate_vote_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_delegate_recipient_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_delegate_wallets_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_timed_txns_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_quash_ledger_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_quash_lookup_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_wallet_lookup_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_fast_quorum_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_duplicate_txn_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_delegatees_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_voted_proposals_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_wallet_nonce_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_processed_txns_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_processed_wallets_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_preprocessed_nonce_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_validate_txns_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_gov_txn_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_sc_transactions_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_contract_price_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_attestation_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_confirmed_blocks_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_attestation_ledger_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_validator_archive_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_quash_ledger_lookup_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_system_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_gossip_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_sc_temp_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_allowance_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_sc_subscriber_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_event_management_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_staked_coins_voted_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_staked_coins_voted_temp_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_fee_tokens_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_fee_tokens_temp_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
+template int db_base<db_smart_contract_states_tag>::find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
 
 template <typename T>
 int db_base<T>::get_first_data(std::string &key, std::string &value)

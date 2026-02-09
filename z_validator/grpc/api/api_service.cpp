@@ -56,4 +56,9 @@ grpc::Status APIImpl::SmartContractEventsSearch(grpc::ServerContext *context, co
     return RecieveSmartContractEventsSearch(context, request, response);
 }
 
+grpc::Status APIImpl::GetAllAuthorizedFees(grpc::ServerContext *context, const google::protobuf::Empty *request, zera_api::GetAllAuthorizedFeesResponse *response)
+{
+    return RecieveGetAllAuthorizedFees(context, request, response);
+}
+
 

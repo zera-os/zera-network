@@ -32,12 +32,15 @@ WasmEdge_Result GetACEData(void *Data, const WasmEdge_CallingFrameContext *CallF
         if(!zera_fees::get_cur_equiv(contract_id, cur_equiv))
         {
             qualified = "false";
-            rate_str = "0";
         }
-        else
+
+        if(cur_equiv == 1)
         {
-            rate_str = cur_equiv.str();
+            cur_equiv = 0;
         }
+        
+        rate_str = cur_equiv.str();
+        
 
         std::string return_data = qualified + "," + rate_str;
 

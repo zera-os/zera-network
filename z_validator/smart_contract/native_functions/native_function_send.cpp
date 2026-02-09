@@ -11,6 +11,7 @@
 #include "smart_contract_sender_data.h"
 #include "fees.h"
 #include "const.h"
+#include "nf_helpers.h"
 
 #include <google/protobuf/util/time_util.h>
 
@@ -30,12 +31,15 @@ namespace
     {
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t priority_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv);
+        if(priority_equiv == 1)
         {
             priority_equiv = ONE_DOLLAR;
         }
@@ -49,12 +53,15 @@ namespace
         perc_fee_amount = amount * contract_fee / quintillion;
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t txn_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, txn_equiv);
+        if(txn_equiv == 1)
         {
             txn_equiv = ONE_DOLLAR;
         }
@@ -88,10 +95,12 @@ namespace
         uint256_t contract_fee(contract.contract_fees().fee());
         uint256_t denomination(contract.coin_denomination().amount());
         uint256_t contract_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv);
+        if(contract_equiv == 1)
         {
             contract_equiv = ONE_DOLLAR;
         }
+
 
         switch (contract.contract_fees().contract_fee_type())
         {
@@ -100,10 +109,12 @@ namespace
             // contract fee has quintillion multiplier
             // fee_equiv has 1 quintillion multiplier
             uint256_t fee_equiv;
-            if(!zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv))
+            zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv);
+            if(fee_equiv == 1)
             {
                 fee_equiv = ONE_DOLLAR;
             }
+
             contract_fee_amount = (contract_fee * denomination) / fee_equiv;
             break;
         }
@@ -124,77 +135,6 @@ namespace
 
         txn->set_contract_fee_amount(contract_fee_amount.str());
         return true;
-    }
-
-    void calc_fee(zera_txn::CoinTXN *txn, uint256_t &txn_fee_amount)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
-
-        uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::COIN_TYPE));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination)  / equiv;
-
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-        base->set_fee_amount("1000000000000");
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-    }
-
-    std::string delegate_set_base(zera_txn::BaseTXN *base, SenderDataType &sender, const std::string& delegate_wallet)
-    {
-        std::string sc_auth = "";
-
-        int x = 0;
-        for(auto &wallet : sender.wallet_chain)
-        {
-            if(delegate_wallet == wallet)
-            {
-                sc_auth = "sc_" + sender.call_chain[x];
-                break;
-            }
-            x++;
-        }
-
-        if(sc_auth == "")
-        {
-            return sc_auth;
-        }
-
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("1000000000000");
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-
-        return sc_auth;
-    }
-
-    std::string current_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.current_smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("100000000000");
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-
-        return sc_auth;
     }
 
     void set_auth(zera_txn::TransferAuthentication *auth, SenderDataType &sender)
@@ -269,7 +209,7 @@ namespace
             return "FAILED: Did not calculate contract fee";
         }
 
-        calc_fee(&txn, txn_fee_amount);
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
 
         if (transfer_all_zra)
         {
@@ -298,9 +238,8 @@ namespace
 
         zera_txn::BaseTXN *base = txn.mutable_base();
 
-        std::string sc_auth = delegate_set_base(base, sender, delegate_wallet);
-
-        if(sc_auth == "")
+        std::string sc_auth;
+        if (!delegate_set_base(base, sender, delegate_wallet, sc_auth))
         {
             return "FAILED: Delegate wallet not found";
         }
@@ -314,15 +253,13 @@ namespace
             return "FAILED: Did not calculate contract fee";
         }
 
-        calc_fee(&txn, txn_fee_amount);
-
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
 
         if (transfer_all_zra)
         {
             amount_int = amount_int - txn_fee_amount;
             amount_int = amount_int - contract_fee_amount;
         }
-
 
         set_input(txn.add_input_transfers(), amount_int.str());
 
@@ -346,7 +283,7 @@ namespace
 
         std::string sc_auth = current_set_base(base, sender);
 
-        if(sc_auth == "")
+        if (sc_auth == "")
         {
             return "FAILED: Delegate wallet not found";
         }
@@ -362,15 +299,13 @@ namespace
             return "FAILED: Did not calculate contract fee";
         }
 
-        calc_fee(&txn, txn_fee_amount);
-
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
 
         if (transfer_all_zra)
         {
             amount_int = amount_int - txn_fee_amount;
             amount_int = amount_int - contract_fee_amount;
         }
-
 
         set_input(txn.add_input_transfers(), amount_int.str());
 
@@ -389,7 +324,7 @@ WasmEdge_Result Send(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -469,7 +404,7 @@ WasmEdge_Result Send(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
     }
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string status = create_transfer(sender, contract_id, amount, wallet_string);
+    std::string status = create_transfer(*sender, contract_id, amount, wallet_string);
 
     logging::print("[Send] Status: ", status, true);
 
@@ -489,7 +424,7 @@ WasmEdge_Result SendAll(void *Data, const WasmEdge_CallingFrameContext *CallFram
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t WalletPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t WalletSize = WasmEdge_ValueGetI32(In[1]);
@@ -524,7 +459,7 @@ WasmEdge_Result SendAll(void *Data, const WasmEdge_CallingFrameContext *CallFram
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string wallet_lookup = "TOKEN_LOOKUP_" + sender.smart_contract_wallet;
+    std::string wallet_lookup = "TOKEN_LOOKUP_" + sender->smart_contract_wallet;
     std::string lookup_data;
     if (!db_wallet_lookup::get_single(wallet_lookup, lookup_data))
     {
@@ -543,9 +478,8 @@ WasmEdge_Result SendAll(void *Data, const WasmEdge_CallingFrameContext *CallFram
     {
         std::string result = "FAILED: Did not parse token lookup";
         const char *val = result.c_str();
-        const size_t len = result.length(); 
+        const size_t len = result.length();
 
-   
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
 
@@ -561,25 +495,24 @@ WasmEdge_Result SendAll(void *Data, const WasmEdge_CallingFrameContext *CallFram
         }
 
         std::string amount;
-        if (db_wallets::get_single(sender.smart_contract_wallet + token, amount))
+        if (db_wallets::get_single(sender->smart_contract_wallet + token, amount))
         {
-            std::string status = create_transfer(sender, token, amount, wallet_string);
+            std::string status = create_transfer(*sender, token, amount, wallet_string);
             transfer_message += token + std::string(": ") + status + std::string(", ");
         }
     }
 
     std::string amount;
 
-    if (db_processed_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount))
+    if (db_processed_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount))
     {
-        std::string status = create_transfer(sender, NETWORK_CONTRACT, amount, wallet_string, true);
+        std::string status = create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, true);
         transfer_message += std::string("$ZRA+0000 :") + status;
     }
 
-
     std::string result = transfer_message;
     const char *val = result.c_str();
-    const size_t len = result.length(); 
+    const size_t len = result.length();
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);
@@ -594,7 +527,7 @@ WasmEdge_Result DelegateSend(void *Data, const WasmEdge_CallingFrameContext *Cal
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -607,7 +540,7 @@ WasmEdge_Result DelegateSend(void *Data, const WasmEdge_CallingFrameContext *Cal
 
     uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[6]);
     uint32_t DelegateSize = WasmEdge_ValueGetI32(In[7]);
-    
+
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
     std::vector<unsigned char> ContractKey(ContractSize);
@@ -694,7 +627,7 @@ WasmEdge_Result DelegateSend(void *Data, const WasmEdge_CallingFrameContext *Cal
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string status = delegate_create_transfer(sender, contract_id, amount, wallet_string, delegate_string);
+    std::string status = delegate_create_transfer(*sender, contract_id, amount, wallet_string, delegate_string);
 
     std::string result = status;
     const char *val = result.c_str();
@@ -712,7 +645,7 @@ WasmEdge_Result DelegateSendAll(void *Data, const WasmEdge_CallingFrameContext *
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t WalletPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t WalletSize = WasmEdge_ValueGetI32(In[1]);
@@ -760,10 +693,9 @@ WasmEdge_Result DelegateSendAll(void *Data, const WasmEdge_CallingFrameContext *
     {
         wallet_decode = base58_decode(wallet);
     }
-    
+
     std::vector<uint8_t> delegate_wallet_decode;
     delegate_wallet_decode = base58_decode(delegate_wallet);
-    
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
     std::string delegate_wallet_string(delegate_wallet_decode.begin(), delegate_wallet_decode.end());
@@ -806,19 +738,18 @@ WasmEdge_Result DelegateSendAll(void *Data, const WasmEdge_CallingFrameContext *
         std::string amount;
         if (db_wallets::get_single(delegate_wallet + token, amount))
         {
-            std::string status = delegate_create_transfer(sender, token, amount, wallet_string, delegate_wallet_string);
+            std::string status = delegate_create_transfer(*sender, token, amount, wallet_string, delegate_wallet_string);
             transfer_message += token + std::string(": ") + status + std::string(", ");
         }
     }
 
     std::string amount;
 
-    if (db_processed_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount))
+    if (db_processed_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount))
     {
-        std::string status = delegate_create_transfer(sender, NETWORK_CONTRACT, amount, wallet_string, delegate_wallet_string, true);
+        std::string status = delegate_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, delegate_wallet_string, true);
         transfer_message += std::string("$ZRA+0000 :") + status;
     }
-
 
     std::string result = transfer_message;
     const char *val = result.c_str();
@@ -829,7 +760,6 @@ WasmEdge_Result DelegateSendAll(void *Data, const WasmEdge_CallingFrameContext *
     return WasmEdge_Result_Success;
 }
 
-
 // need to send if sc or sender sending txn, contract_id and amount
 WasmEdge_Result CurrentSend(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
@@ -837,7 +767,7 @@ WasmEdge_Result CurrentSend(void *Data, const WasmEdge_CallingFrameContext *Call
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -914,7 +844,7 @@ WasmEdge_Result CurrentSend(void *Data, const WasmEdge_CallingFrameContext *Call
     }
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string status = current_create_transfer(sender, contract_id, amount, wallet_string);
+    std::string status = current_create_transfer(*sender, contract_id, amount, wallet_string);
 
     std::string result = status;
     const char *val = result.c_str();
@@ -932,7 +862,7 @@ WasmEdge_Result CurrentSendAll(void *Data, const WasmEdge_CallingFrameContext *C
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType *sender = (SenderDataType *)Data;
 
     uint32_t WalletPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t WalletSize = WasmEdge_ValueGetI32(In[1]);
@@ -967,13 +897,13 @@ WasmEdge_Result CurrentSendAll(void *Data, const WasmEdge_CallingFrameContext *C
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string wallet_lookup = "TOKEN_LOOKUP_" + sender.smart_contract_wallet;
+    std::string wallet_lookup = "TOKEN_LOOKUP_" + sender->smart_contract_wallet;
     std::string lookup_data;
     if (!db_wallet_lookup::get_single(wallet_lookup, lookup_data))
     {
         std::string result = "No tokens found for wallet";
         const char *val = result.c_str();
-        const size_t len = result.length(); 
+        const size_t len = result.length();
 
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
@@ -986,7 +916,7 @@ WasmEdge_Result CurrentSendAll(void *Data, const WasmEdge_CallingFrameContext *C
     {
         std::string result = "FAILED: Did not parse token lookup";
         const char *val = result.c_str();
-        const size_t len = result.length(); 
+        const size_t len = result.length();
 
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
@@ -1003,25 +933,24 @@ WasmEdge_Result CurrentSendAll(void *Data, const WasmEdge_CallingFrameContext *C
         }
 
         std::string amount;
-        if (db_wallets::get_single(sender.smart_contract_wallet + token, amount))
+        if (db_wallets::get_single(sender->smart_contract_wallet + token, amount))
         {
-            std::string status = current_create_transfer(sender, token, amount, wallet_string);
+            std::string status = current_create_transfer(*sender, token, amount, wallet_string);
             transfer_message += token + std::string(": ") + status + std::string(", ");
         }
     }
 
     std::string amount;
 
-    if (db_processed_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender.smart_contract_wallet + NETWORK_CONTRACT, amount))
+    if (db_processed_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender->smart_contract_wallet + NETWORK_CONTRACT, amount))
     {
-        std::string status = current_create_transfer(sender, NETWORK_CONTRACT, amount, wallet_string, true);
+        std::string status = current_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, true);
         transfer_message += std::string("$ZRA+0000 :") + status;
     }
 
-
     std::string result = transfer_message;
     const char *val = result.c_str();
-    const size_t len = result.length(); 
+    const size_t len = result.length();
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);

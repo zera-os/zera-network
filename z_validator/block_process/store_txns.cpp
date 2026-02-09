@@ -10,6 +10,10 @@
 #include "../governance/gov_process.h"
 #include "../restricted/restricted_keys.h"
 #include "../logging/logging.h"
+#include <string>
+#include <vector>
+#include <sstream>
+#include "base64.h"
 
 // testing
 #include "utils.h"
@@ -17,6 +21,20 @@
 
 namespace
 {
+
+    std::vector<std::string> split_string(const std::string &str, char delimiter)
+    {
+        std::vector<std::string> result;
+        std::string token;
+        std::istringstream tokenStream(str);
+
+        while (std::getline(tokenStream, token, delimiter))
+        {
+            result.push_back(token);
+        }
+
+        return result;
+    }
 
     std::string get_block_key(uint64_t height, std::string hash)
     {
@@ -26,10 +44,17 @@ namespace
         return paddedHeight + ":" + hash;
     }
 
-    void staged(const zera_txn::InstrumentContract &contract, const zera_validator::ProposalLedger &old_proposal_ledger, zera_validator::ProposalLedger &new_proposal_ledger, const uint64_t timestamp)
+    void staged(const zera_txn::InstrumentContract &contract, zera_validator::ProposalLedger &old_proposal_ledger, zera_validator::ProposalLedger &new_proposal_ledger, const uint64_t timestamp)
     {
         bool final_stage = false;
-        int stage;
+        int stage = old_proposal_ledger.stage();
+
+        if (old_proposal_ledger.stage() == 0)
+        {
+            final_stage = true;
+            stage = 1;
+            new_proposal_ledger.set_stage(1);
+        }
 
         if (old_proposal_ledger.stage() >= contract.governance().stage_length_size())
         {
@@ -85,7 +110,6 @@ namespace
                 db_proposals::get_single(proposal_id, proposal_data);
                 if (!proposal.ParseFromString(proposal_data))
                 {
-                    logging::print("Failed to parse proposal data for proposal id:", proposal_id, "skipping");
                     continue;
                 }
 
@@ -127,6 +151,7 @@ namespace
             }
             else
             {
+                time_calc::get_end_date_cycle(new_proposal_ledger.cycle_start_date(), days, months);
                 end_ts = time_calc::get_end_date_cycle(new_proposal_ledger.cycle_start_date(), days, months);
             }
 
@@ -139,7 +164,6 @@ namespace
                 db_proposals::get_single(proposal_id, proposal_data);
                 if (!proposal.ParseFromString(proposal_data))
                 {
-                    logging::print("Failed to parse proposal data for proposal id:", proposal_id, "skipping");
                     continue;
                 }
                 proposal.set_stage(1);
@@ -161,9 +185,9 @@ namespace
             {
                 end_ts = time_calc::get_end_date_cycle(old_proposal_ledger.stage_end_date(), days, months);
             }
-
             new_proposal_ledger.mutable_stage_end_date()->set_seconds(end_ts.seconds());
             new_proposal_ledger.mutable_stage_start_date()->set_seconds(old_proposal_ledger.stage_end_date().seconds());
+            new_proposal_ledger.set_stage(stage + 1);
         }
     }
     void cycle(const zera_txn::InstrumentContract &contract, const zera_validator::ProposalLedger &old_proposal_ledger, zera_validator::ProposalLedger &new_proposal_ledger)
@@ -336,7 +360,6 @@ namespace
                 zera_api::SmartContractEventManagement event_management;
                 event_management.ParseFromString(event_data);
 
-                logging::print("event_management_size: " + std::to_string(event_management.events().size()), true);
                 // Collect keys to delete first to avoid iterator invalidation
                 std::vector<std::string> keys_to_delete;
                 for (auto event : event_management.events())
@@ -346,9 +369,9 @@ namespace
                         keys_to_delete.push_back(event.first);
                     }
                 }
-                
+
                 // Now delete them
-                for (const auto& key : keys_to_delete)
+                for (const auto &key : keys_to_delete)
                 {
                     event_management.mutable_events()->erase(key);
                     db_event_management::remove_single(key);
@@ -365,6 +388,331 @@ namespace
             logging::print("Exception caught:", e.what(), true);
         }
     }
+
+    void update_staked_coins_voted()
+    {
+        std::vector<std::string> keys;
+        std::vector<std::string> values;
+        db_staked_coins_voted_temp::get_all_data(keys, values);
+        rocksdb::WriteBatch staked_coins_voted_batch;
+        int x = 0;
+
+        while (x < keys.size())
+        {
+            std::string key = keys[x];
+            std::string value = values[x];
+            staked_coins_voted_batch.Put(key, value);
+            x++;
+        }
+        db_staked_coins_voted::store_batch(staked_coins_voted_batch);
+        db_staked_coins_voted_temp::remove_all();
+    }
+
+    void update_fee_tokens(const uint64_t &new_block_time, const zera_txn::TXNS &txns, const std::map<std::string, bool> &txns_passed)
+    {
+        std::vector<std::string> keys;
+        std::vector<std::string> values;
+        rocksdb::WriteBatch fee_tokens_batch;
+        db_fee_tokens_temp::get_all_data(keys, values);
+        // FEE_TOKENS
+        int x = 0;
+        while (x < keys.size())
+        {
+            std::string key = keys[x];
+            std::string value = values[x];
+            fee_tokens_batch.Put(key, value);
+            x++;
+        }
+        db_fee_tokens::store_batch(fee_tokens_batch);
+        db_fee_tokens_temp::remove_all();
+
+        std::unordered_set<std::string> tokens_to_update; // Instead of vector
+
+        for (auto execute : txns.smart_contract_executes())
+        {
+            if (!txns_passed.at(execute.base().hash()))
+            {
+                continue;
+            }
+
+            if (execute.smart_contract_name() == "zera_dex_proxy" && execute.instance() == 1 && execute.function() == "execute")
+            {
+
+                if (execute.parameters().size() != 2)
+                {
+                    continue;
+                }
+
+                zera_txn::Parameters parameter = execute.parameters().at(0);
+                zera_txn::Parameters parameter2 = execute.parameters().at(1);
+
+                if (parameter.type() != "string" || parameter2.type() != "string")
+                {
+                    continue;
+                }
+
+                if (parameter.value() != "swap" && parameter.value() != "create_liquidity_pool" && parameter.value() != "remove_liquidity")
+                {
+                    continue;
+                }
+
+
+                std::vector<std::string> parameters_vec = split_string(parameter2.value(), ',');
+
+                if (parameter.value() == "remove_liquidity")
+                {
+
+                    if (parameters_vec.size() != 4)
+                    {
+                        continue;
+                    }
+
+                    if (parameters_vec.at(3) != "25")
+                    {
+                        continue;
+                    }
+
+                    if (parameters_vec.at(0) != NETWORK_CONTRACT && parameters_vec.at(1) != NETWORK_CONTRACT)
+                    {
+                        continue;
+                    }
+
+                    std::string token1 = parameters_vec.at(0);
+                    std::string token2 = parameters_vec.at(1);
+
+                    if (token1 == NETWORK_CONTRACT)
+                    {
+                        if (tokens_to_update.find(token2) == tokens_to_update.end())
+                        {
+                            tokens_to_update.insert(token2);
+                        }
+                    }
+                    else
+                    {
+                        if (tokens_to_update.find(token1) == tokens_to_update.end())
+                        {
+                            tokens_to_update.insert(token1);
+                        }
+                    }
+                }
+                else if (parameter.value() == "create_liquidity_pool" || parameter.value() == "swap")
+                {
+                    if (parameters_vec.size() != 6)
+                    {
+                        logging::print("parameters_vec.size() != 6", true);
+                        continue;
+                    }
+
+                    if(parameter.value() == "swap" && parameters_vec.at(3) != "25")
+                    {
+                        logging::print("parameters_vec.at(3) != 25", true);
+                        continue;
+                    }
+
+                    if(parameter.value() == "create_liquidity_pool" && parameters_vec.at(4) != "25" )
+                    {
+                        logging::print("parameters_vec.at(4) != 25", true);
+                        continue;
+                    }
+
+                    if (parameters_vec.at(0) != "$ZRA+0000" && parameters_vec.at(1) != "$ZRA+0000")
+                    {
+                        logging::print("parameters_vec.at(0) != $ZRA+0000 && parameters_vec.at(1) != $ZRA+0000", true);
+                        continue;
+                    }
+
+                    std::string token1 = parameters_vec.at(0);
+                    std::string token2 = parameters_vec.at(1);
+
+                    if (token1 == NETWORK_CONTRACT)
+                    {
+                        if (tokens_to_update.find(token2) == tokens_to_update.end())
+                        {
+                            tokens_to_update.insert(token2);
+                        }
+                    }
+                    else
+                    {
+                        if (tokens_to_update.find(token1) == tokens_to_update.end())
+                        {
+                            tokens_to_update.insert(token1);
+                        }
+                    }
+                }
+            }
+        }
+
+        std::string update_key = "LAST_UPDATED";
+        std::string value;
+        uint64_t last_updated;
+        if (!db_fee_tokens::get_single(update_key, value))
+        {
+            last_updated = 0;
+        }
+        else
+        {
+            last_updated = boost::lexical_cast<uint64_t>(value);
+        }
+
+        std::string stable_coin_contract;
+        if(!db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) || stable_coin_contract == "" || !db_contracts::exist(stable_coin_contract))
+        {
+            stable_coin_contract = STABLE_COIN_CONTRACT;
+        }
+
+        if (tokens_to_update.size() > 0)
+        {
+            zera_validator::FeeToken zra_fee_token;
+            std::string fee_data;
+            db_fee_tokens::get_single(FEE_TOKENS + NETWORK_CONTRACT, fee_data);
+            zra_fee_token.ParseFromString(fee_data);
+
+
+            std::string zra_stable_coin_key = ACE_PROXY + NETWORK_CONTRACT + stable_coin_contract;
+            std::string rate_data;
+            uint256_t zra_rate;
+
+            if (!db_smart_contract_states::get_single(zra_stable_coin_key, rate_data) || rate_data == "")
+            {
+                zra_rate = ONE_DOLLAR;
+            }
+            else
+            {
+                zra_rate = boost::lexical_cast<uint256_t>(rate_data);
+            }
+
+            if (tokens_to_update.find(stable_coin_contract) != tokens_to_update.end())
+            {
+                zra_fee_token.set_contract_id(NETWORK_CONTRACT);
+                zra_fee_token.set_rate(zra_rate.str());
+                zra_fee_token.set_authorized(true);
+                zra_fee_token.set_whitelisted(true);
+                
+                db_fee_tokens::store_single(FEE_TOKENS + NETWORK_CONTRACT, zra_fee_token.SerializeAsString());
+            }
+
+            for (auto token : tokens_to_update)
+            {
+                std::string lp_token_data;
+                std::string lp_token_key = ZERA_DEX_LP + token;
+
+                if (!db_smart_contract_states::get_single(lp_token_key, lp_token_data) || lp_token_data == "")
+                {
+                    db_fee_tokens::remove_single(FEE_TOKENS + token);
+                    continue;
+                }
+
+                LiquidityPool lp_token = decode_liquidity_pool(lp_token_data);
+                std::string lp_token_burn_balance;
+                std::string burn_wallet = BURN_WALLET + lp_token.lp_token_id;
+
+                if (!db_wallets::get_single(burn_wallet, lp_token_burn_balance) || lp_token_burn_balance == "" || lp_token_burn_balance == "0")
+                {
+                    lp_token_burn_balance = "0";
+                }
+
+                uint256_t lp_token_burn_balance_uint = boost::lexical_cast<uint256_t>(lp_token_burn_balance);
+                uint256_t zera_volume = boost::lexical_cast<uint256_t>(lp_token.token1_volume);
+                uint256_t lp_token_volume = boost::lexical_cast<uint256_t>(lp_token.circulating_lp_tokens);
+
+
+                // Calculate what % of LP tokens are burned and apply to ZRA volume
+                uint256_t zera_locked_by_burned_lp = (lp_token_burn_balance_uint * zera_volume) / lp_token_volume;
+
+
+                // Convert locked ZRA to stable coin value
+                uint256_t stable_value = (zera_locked_by_burned_lp * zra_rate) / uint256_t("1000000000");
+
+                // Check if at least 1000 stable coins are locked
+                uint256_t min_stable_required = 1000 * ONE_DOLLAR;
+                bool authorized = true;
+                if (stable_value < min_stable_required)
+                {
+                    authorized = false;
+                }
+
+                std::string fee_token_data;
+                zera_validator::FeeToken fee_token;
+                std::string fee_token_key = FEE_TOKENS + token;
+                bool found = true;
+
+                if (!db_fee_tokens::get_single(fee_token_key, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
+                {
+                    found = false;
+                }
+
+                fee_token.set_contract_id(token);
+
+                std::string token_ratio_key = ACE_PROXY + token;
+                std::string token_ratio_data;
+                if (db_smart_contract_states::get_single(token_ratio_key, token_ratio_data) && token_ratio_data != "")
+                {
+                    zera_txn::InstrumentContract contract;
+                    if(!block_process::get_contract(token, contract).ok())
+                    {
+                        continue;
+                    }
+                    uint256_t denomination(contract.coin_denomination().amount());
+                    if (is_valid_uint256(token_ratio_data))
+                    {
+                        uint256_t token_ratio = boost::lexical_cast<uint256_t>(token_ratio_data);
+                        uint256_t rate = (token_ratio * zra_rate) / ONE_DOLLAR;
+                        uint256_t max_stake = (stable_value *  denomination) / rate;
+
+                        fee_token.set_authorized(authorized);
+                        fee_token.set_max_stake(max_stake.str());
+                        fee_token.set_rate(rate.str());
+                        fee_token.set_stable_value_allowed(stable_value.str());
+                        fee_token.set_whitelisted(false);
+                        std::string token_whitelist_data;
+                        if(db_smart_contract_states::get_single(TOKEN_WHITELIST, token_whitelist_data) && token_whitelist_data != "")
+                        {
+                            NetworkValues network_values = decode_network_values(token_whitelist_data);
+                            if(std::find(network_values.values.begin(), network_values.values.end(), token) != network_values.values.end())
+                            {
+                                fee_token.set_whitelisted(true);
+                            }
+                        }
+
+                        db_fee_tokens_temp::store_single(token, fee_token.SerializeAsString());
+
+                        if (!found)
+                        {
+                            fee_token.set_value_used("0");
+                        }
+                    }
+
+                    db_fee_tokens::store_single(fee_token_key, fee_token.SerializeAsString());
+                }
+            }
+        }
+
+        uint64_t new_block_day = new_block_time / 86400;
+
+        if (new_block_day > last_updated)
+        {
+            rocksdb::WriteBatch fee_tokens_batch2;
+            fee_tokens_batch2.Put(update_key, std::to_string(new_block_day));
+
+            std::vector<std::string> keys;
+            std::vector<std::string> values;
+            db_fee_tokens::find_by_prefix(FEE_TOKENS, keys, values);
+
+            int x = 0;
+            while (x < keys.size())
+            {
+                std::string key = keys[x];
+                std::string value = values[x];
+                zera_validator::FeeToken fee_token;
+                fee_token.ParseFromString(value);
+
+                fee_token.set_value_used("0");
+                fee_tokens_batch2.Put(key, fee_token.SerializeAsString());
+                x++;
+            }
+            db_fee_tokens::store_batch(fee_tokens_batch2);
+        }
+    }
 }
 ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive, bool backup)
 {
@@ -374,9 +722,11 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
     block_process::store_wallets();
     allowance_tracker::update_allowance_database();
     update_event_management(block);
+    update_staked_coins_voted();
     auto txns = block->transactions();
     std::map<std::string, bool> txn_passed;
     txn_batch::find_passed(txn_passed, txns);
+    update_fee_tokens(block->block_header().timestamp().seconds(), txns, txn_passed);
     txn_batch::batch_contracts(txns, txn_passed);
     txn_batch::batch_contract_updates(txns, txn_passed);
     txn_batch::batch_item_mint(txns, txn_passed);
@@ -385,6 +735,7 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
     store_proposal_adjustment();
     txn_batch::batch_votes(txns, txn_passed);
     txn_batch::batch_proposal_results(txns, txn_passed);
+    txn_batch::batch_proposal_cancel(txns, txn_passed);
     txn_batch::batch_compliance(txns, txn_passed);
     txn_batch::batch_delegated_voting(txns, txn_passed);
     txn_batch::batch_validator_registration(txns, txn_passed, block->block_header());

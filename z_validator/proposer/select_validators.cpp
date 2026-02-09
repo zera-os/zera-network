@@ -84,7 +84,7 @@ namespace
         }
         uint256_t cur_equiv;
         uint256_t amount(wallet_balance);
-        if(!zera_fees::get_cur_equiv(contract_id, cur_equiv))
+        if(!zera_fees::get_cur_equiv_validator(contract_id, cur_equiv))
         {
             return 0;
         }

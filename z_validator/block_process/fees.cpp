@@ -12,63 +12,87 @@
 #include "../compliance/compliance.h"
 #include "utils.h"
 #include "../logging/logging.h"
+#include "base64.h"
+
+
+bool zera_fees::get_cur_equiv_validator(const std::string &contract_id, uint256_t &cur_equiv)
+{
+    // Just read the pre-calculated rate from database
+    std::string fee_token_key = FEE_TOKENS + contract_id;
+    std::string fee_token_data;
+    zera_validator::FeeToken fee_token;
+
+    
+    if(!db_fee_tokens::get_single(fee_token_key, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
+    {
+
+        if(contract_id == NETWORK_CONTRACT)
+        {
+            cur_equiv = ONE_DOLLAR;
+            return true;
+        }
+        cur_equiv = 1;
+        return false;
+    }
+
+    cur_equiv = boost::lexical_cast<uint256_t>(fee_token.rate());
+
+    if(contract_id == NETWORK_CONTRACT && cur_equiv < ONE_DOLLAR)
+    {
+        cur_equiv = ONE_DOLLAR;
+    }
+
+    if(fee_token.whitelisted())
+    {
+        return true;
+    }
+
+    return fee_token.authorized();
+}
 
 // function to get the cur equivalent of both the token and the fee token
 // 1.00$ = 1 000 000 000 000 000 000
 bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equiv)
 {
+    std::string stable_coin_contract;
 
-    std::string ace_sc_key;
-
-    if (!db_smart_contracts::get_single(ACE_PROXY, ace_sc_key) || ace_sc_key == "")
+    if(!db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) || stable_coin_contract == "" || !db_contracts::exist(stable_coin_contract))
     {
-        if (contract_id == NETWORK_CONTRACT)
+        stable_coin_contract = STABLE_COIN_CONTRACT;
+    }
+
+    if(contract_id == stable_coin_contract)
+    {
+        cur_equiv = ONE_DOLLAR;
+        return true;
+    }
+
+    // Just read the pre-calculated rate from database
+    std::string fee_token_key = FEE_TOKENS + contract_id;
+    std::string fee_token_data;
+    zera_validator::FeeToken fee_token;
+
+    
+    if(!db_fee_tokens::get_single(fee_token_key, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
+    {
+
+        if(contract_id == NETWORK_CONTRACT)
         {
             cur_equiv = ONE_DOLLAR;
             return true;
         }
-
+        cur_equiv = 1;
         return false;
     }
 
-    ace_sc_key += "_" + contract_id;
+    cur_equiv = boost::lexical_cast<uint256_t>(fee_token.rate());
 
-    std::string rate_data;
-    if (!db_smart_contracts::get_single(ace_sc_key, rate_data) || rate_data == "")
+    if(contract_id == NETWORK_CONTRACT && cur_equiv < ONE_DOLLAR)
     {
-        if (contract_id == NETWORK_CONTRACT)
-        {
-            cur_equiv = ONE_DOLLAR;
-            return true;
-        }
-
-        return false;
+        cur_equiv = ONE_DOLLAR;
     }
 
-    if (!is_valid_uint256(rate_data))
-    {
-        if (contract_id == NETWORK_CONTRACT)
-        {
-            cur_equiv = ONE_DOLLAR;
-            return true;
-        }
-
-        return false;
-    }
-
-    uint256_t rate(rate_data);
-
-    if (contract_id == NETWORK_CONTRACT)
-    {
-        if (rate < ONE_DOLLAR)
-        {
-            cur_equiv = ONE_DOLLAR;
-            return true;
-        }
-    }
-
-    cur_equiv = rate;
-    return true;
+    return fee_token.authorized();
 }
 
 ZeraStatus zera_fees::check_allowed_contract_fee(const google::protobuf::RepeatedPtrField<std::string> &allowed_fees, const std::string contract_id, zera_fees::ALLOWED_CONTRACT_FEE &allowed_fee)
@@ -123,26 +147,18 @@ bool zera_fees::check_qualified(const std::string &contract_id)
         return false;
     }
 
-    std::string ace_sc_key;
-
-    if (!db_smart_contracts::get_single(ACE_PROXY, ace_sc_key) || ace_sc_key == "")
+    std::string fee_token_data;
+    zera_validator::FeeToken fee_token;
+    if(!db_fee_tokens::get_single(FEE_TOKENS + contract_id, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
     {
         return false;
     }
 
-    ace_sc_key += "_" + contract_id;
-
-    std::string rate_data;
-    if (!db_smart_contracts::get_single(ace_sc_key, rate_data) || rate_data == "")
-    {
-        return false;
-    }
-
-    return true;
+    return fee_token.authorized();
 }
 
 ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint256_t &FEE_PER_BYTE, const int &bytes,
-                                     const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const zera_txn::PublicKey &public_key, const bool safe_send)
+                                     const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const zera_txn::PublicKey &public_key, const std::string &contract_id, const bool safe_send)
 {
 
     uint256_t fee_per_byte(FEE_PER_BYTE);
@@ -164,6 +180,18 @@ ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint
     }
 
     txn_fee_amount += key_fee_amount / TOKEN_USD_EQIV;
+    
+    if(contract_id != NETWORK_CONTRACT)
+    {
+        uint256_t token_multiplier = get_fee(TOKEN_MULTIPLIER);
+        txn_fee_amount *= token_multiplier;
+
+        if(!fee_token_tracker::add_temp_fee_token(contract_id, txn_fee_amount, denomination))
+        {
+            return ZeraStatus(ZeraStatus::Code::COIN_TXN_ERROR, "process_coin.cpp: calculate_fees: Failed to add temp fee token.", zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);
+        }
+    }
+
 
     if (txn_fee_amount > authorized_fees_uint)
     {
@@ -176,7 +204,7 @@ ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint
 }
 
 ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint256_t &FEE_PER_BYTE, const int &bytes,
-                                     const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const bool safe_send)
+                                     const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const std::string &contract_id, bool safe_send)
 {
 
     uint256_t fee_per_byte(FEE_PER_BYTE);
@@ -194,6 +222,17 @@ ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint
         txn_fee_amount += safe_send_amount / TOKEN_USD_EQIV;
     }
 
+    if(contract_id != NETWORK_CONTRACT)
+    {
+        uint256_t token_multiplier = get_fee(TOKEN_MULTIPLIER);
+        txn_fee_amount *= token_multiplier;
+
+        if(!fee_token_tracker::add_temp_fee_token(contract_id, txn_fee_amount, denomination))
+        {
+            return ZeraStatus(ZeraStatus::Code::COIN_TXN_ERROR, "process_coin.cpp: calculate_fees: Failed to add temp fee token.", zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);
+        }
+    }
+
     if (txn_fee_amount > authorized_fees_uint)
     {
         logging::print("process_coin.cpp: calculate_fees: The sender did not authorize enough fees.", txn_fee_amount.str(), true);
@@ -205,13 +244,25 @@ ZeraStatus zera_fees::calculate_fees(const uint256_t &TOKEN_USD_EQIV, const uint
 }
 
 ZeraStatus zera_fees::calculate_fees_heartbeat(const uint256_t &TOKEN_USD_EQIV, const uint256_t &FEE_PER_BYTE, const int &bytes,
-                                               const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const zera_txn::PublicKey &public_key)
+                                               const std::string &authorized_fees, uint256_t &txn_fee_amount, std::string denomination_str, const zera_txn::PublicKey &public_key, const std::string &contract_id)
 {
     uint256_t fee_per_byte(FEE_PER_BYTE);
     uint256_t fee = fee_per_byte * bytes;
     uint256_t denomination(denomination_str);
     uint256_t item_fee = denomination * fee;
     txn_fee_amount = item_fee / TOKEN_USD_EQIV;
+
+    if(contract_id != NETWORK_CONTRACT)
+    {
+        uint256_t token_multiplier = get_fee(TOKEN_MULTIPLIER);
+        txn_fee_amount *= token_multiplier;
+
+        if(!fee_token_tracker::add_temp_fee_token(contract_id, txn_fee_amount, denomination))
+        {
+            return ZeraStatus(ZeraStatus::Code::COIN_TXN_ERROR, "process_coin.cpp: calculate_fees: Failed to add temp fee token.", zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);
+        }
+    }
+
 
     uint256_t authorized_fees_uint(authorized_fees);
 

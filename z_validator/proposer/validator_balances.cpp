@@ -78,7 +78,7 @@ namespace
         }
         uint256_t cur_equiv;
         uint256_t amount(wallet_balance);
-        if(!zera_fees::get_cur_equiv(contract_id, cur_equiv))
+        if(!zera_fees::get_cur_equiv_validator(contract_id, cur_equiv))
         {
             return 0;
         }
@@ -140,29 +140,27 @@ namespace
         {
             if (stake.first != ZERA_SYMBOL)
             {
-                //TODO : add something in the future for max validator stake
+                std::string cur_data;
+                zera_validator::FeeToken fee_token;
 
-                // std::string cur_data;
-                // zera_validator::CurrencyRate cur_rate;
-                // db_currency_equiv::get_single(stake.first, cur_data);
-                // cur_rate.ParseFromString(cur_data);
+                if(!db_fee_tokens::get_single(FEE_TOKENS + stake.first, cur_data) || !fee_token.ParseFromString(cur_data))
+                {
+                    continue;
+                }
 
-                // uint256_t max_stake(cur_rate.max_stake());
+                uint256_t max_stake(fee_token.max_stake());
 
-                // //
-                // if (stake.second > max_stake)
-                // {
-                //     uint256_t scaled_stake_multiplier = (max_stake * STAKED_MATH_MULTIPLIER) / stake.second;
-                //     scaled_stake_multiplier.str();
-                //     stake_multipliers.mutable_contract_multipliers()->operator[](stake.first) = scaled_stake_multiplier.str();
-                //     stake.second = max_stake;
-                // }
-                // else
-                // {
-                //     stake_multipliers.mutable_contract_multipliers()->operator[](stake.first) = "N/A";
-                // }
-
-                // total_stake_balance += stake.second;
+                if(stake.second > max_stake)
+                {
+                    uint256_t scaled_stake_multiplier = (max_stake * STAKED_MATH_MULTIPLIER) / stake.second;
+                    scaled_stake_multiplier.str();
+                    stake_multipliers.mutable_contract_multipliers()->operator[](stake.first) = scaled_stake_multiplier.str();
+                    stake.second = max_stake;
+                }
+                else
+                {
+                    stake_multipliers.mutable_contract_multipliers()->operator[](stake.first) = "N/A";
+                }
             }
             else
             {

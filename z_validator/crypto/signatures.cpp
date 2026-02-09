@@ -513,6 +513,7 @@ template bool signatures::verify_txns<zera_txn::BurnSBTTXN>(zera_txn::BurnSBTTXN
 template bool signatures::verify_txns<zera_txn::SmartContractInstantiateTXN>(zera_txn::SmartContractInstantiateTXN &);
 template bool signatures::verify_txns<zera_txn::RequiredVersion>(zera_txn::RequiredVersion &);
 template bool signatures::verify_txns<zera_txn::AllowanceTXN>(zera_txn::AllowanceTXN &);
+template bool signatures::verify_txns<zera_txn::ProposalCancelTXN>(zera_txn::ProposalCancelTXN &);
 
 template <>
 bool signatures::verify_txns<zera_txn::ValidatorRegistration>(zera_txn::ValidatorRegistration &tx)

@@ -22,7 +22,7 @@ namespace
 
         auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
 
-        zera_fees::process_fees(contract, fees, wallet_adr, NETWORK_CONTRACT, true, status_fees, txn->base().hash(), fee_address, true);
+        zera_fees::process_fees(contract, fees, wallet_adr, txn->base().fee_id(), true, status_fees, txn->base().hash(), fee_address, true);
     }
 
     ZeraStatus gas_fees(const zera_txn::SmartContractExecuteTXN *txn, const uint64_t &used_gas, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
@@ -31,7 +31,7 @@ namespace
         std::string contract_id = txn->base().fee_id();
         zera_txn::InstrumentContract contract;
 
-        if(!zera_fees::get_cur_equiv(contract_id, usd_equiv))
+        if (!zera_fees::get_cur_equiv(contract_id, usd_equiv))
         {
             return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_smart_contract_execute.cpp: gas_fees: invalid token for fees: " + contract_id);
         }
@@ -51,7 +51,7 @@ namespace
         std::string contract_id = txn->base().fee_id();
         zera_txn::InstrumentContract contract;
 
-        if(!zera_fees::get_cur_equiv(contract_id, usd_equiv))
+        if (!zera_fees::get_cur_equiv(contract_id, usd_equiv))
         {
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_smart_contract_execute.cpp: gas_limit_calc: invalid token for fees: " + contract_id);
         }
@@ -165,10 +165,11 @@ namespace
                                                                          txn->base().hash(), timestamp,
                                                                          block_txns_key, fee_address,
                                                                          smart_contract_wallet, gas_approved,
-                                                                         used_gas, txn_hashes, derived_wallets);
+                                                                         used_gas, txn_hashes, derived_wallets, db_contract.sc_fees(), txn->base().fee_id());
 
             // store result
             std::string event_data = "";
+            std::vector<std::string> vector_results;
             for (int i = results.size() - 1; i >= 0; --i)
             {
                 std::string val = std::any_cast<std::string>(results[i]);
@@ -176,6 +177,7 @@ namespace
                 status_fees.add_smart_contract_result(val);
 
                 event_data += "[res]" + val + "[end]";
+                vector_results.push_back(val);
             }
 
             if (event_data.size() > 0)
@@ -200,7 +202,10 @@ namespace
                 event_management.mutable_caller()->CopyFrom(txn->base().public_key());
                 event_management.set_function(txn->function());
                 event_management.set_txn_hash(txn_hash);
-                event_management.set_event_data(event_data);
+                for (const auto &result : vector_results)
+                {
+                    event_management.add_event_data(result);
+                }
                 db_event_management::store_single(txn_hash, event_management.SerializeAsString());
             }
 
@@ -215,21 +220,28 @@ namespace
                 event.set_function(txn->function());
                 std::string txn_hash = hex_conversion::bytes_to_hex(txn->base().hash());
                 event.set_txn_hash(txn_hash);
-                event.set_event_data(event_data);
+                for (const auto &result : vector_results)
+                {
+                    event.add_event_data(result);
+                }
             }
 
-            if(derived_wallets.size() > 0)
+            logging::print("[ProcessSmartContractExecute] Derived wallets size:", std::to_string(derived_wallets.size()), true);
+
+            if (derived_wallets.size() > 0)
             {
-                for(const auto& [key, value] : derived_wallets)
+                for (const auto &[key, value] : derived_wallets)
                 {
+                    std::string db_key = value;
+                    std::string db_value = key;
                     std::string temp_value;
                     zera_wallets::DerivedWallets derived_wallet;
-                    db_smart_contracts::get_single(key, temp_value);
+                    db_smart_contract_states::get_single(db_key, temp_value);
                     derived_wallet.ParseFromString(temp_value);
 
-                    derived_wallet.mutable_wallets()->insert({value, true});
-                    db_smart_contracts::store_single(key, derived_wallet.SerializeAsString());
-                    logging::print("[ProcessSmartContractInstantiate] Storing derived wallet:", key, "->", value);
+                    derived_wallet.mutable_wallets()->insert({db_value, true});
+                    db_smart_contract_states::store_single(db_key, derived_wallet.SerializeAsString());
+                    logging::print("[ProcessSmartContractExecute] Storing derived wallet:", db_key, "->", db_value, true);
                 }
             }
 
@@ -262,10 +274,11 @@ namespace
                 if (values[x].empty())
                 {
                     db_smart_contracts::remove_single(key);
+                    db_smart_contract_states::remove_single(key);
                 }
                 else
                 {
-                    db_smart_contracts::store_single(key, values[x]);
+                    db_smart_contract_states::store_single(key, values[x]);
                 }
                 x++;
             }
@@ -315,7 +328,7 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const z
 
     uint256_t fee_taken = 0;
     // process base fees. If wallet cannot pay fees or anything else is wrong with the fees return failed txn
-    status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_EXECUTE_TYPE, fee_taken, fee_address);
+    status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_EXECUTE_TYPE, fee_taken, fee_address, sc_txn);
 
     if (!status.ok())
     {

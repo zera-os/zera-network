@@ -4,6 +4,7 @@
 #include "../logging/logging.h"
 #include "wallets.h"
 #include <unordered_map>
+#include "utils.h"
 
 namespace
 {
@@ -33,6 +34,7 @@ namespace
                 {
                     continue;
                 }
+                std::string staked_coins_voted_key = proposal_id + "_" + wallet_address;
 
                 if (proposal_ledger.second.has_support())
                 {
@@ -44,6 +46,24 @@ namespace
                             // The key exists in the map
                             std::string value_str = (*map)[contract_id];
                             uint256_t value = boost::lexical_cast<uint256_t>(value_str);
+
+                            if (contract_id == NETWORK_CONTRACT)
+                            {
+                                std::string staked_coins_voted_data;
+                                if (db_staked_coins_voted::get_single(staked_coins_voted_key, staked_coins_voted_data))
+                                {
+                                    uint256_t staked_coins_voted = boost::lexical_cast<uint256_t>(staked_coins_voted_data);
+                                    uint256_t staked_coins = get_staked_coins(NETWORK_CONTRACT, wallet_address);
+
+                                    if (staked_coins != staked_coins_voted)
+                                    {
+                                        value -= staked_coins_voted;
+                                        value += staked_coins;
+                                    }
+                                    db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
+                                }
+                            }
+
                             value += add_amount;
                             value -= remove_amount;
                             (*map)[contract_id] = boost::lexical_cast<std::string>(value);
@@ -61,6 +81,25 @@ namespace
                             // The key exists in the map
                             std::string value_str = (*map)[contract_id];
                             uint256_t value = boost::lexical_cast<uint256_t>(value_str);
+
+                            if (contract_id == NETWORK_CONTRACT)
+                            {
+                                std::string staked_coins_voted_data;
+                                if (db_staked_coins_voted::get_single(staked_coins_voted_key, staked_coins_voted_data))
+                                {
+                                    uint256_t staked_coins_voted = boost::lexical_cast<uint256_t>(staked_coins_voted_data);
+                                    uint256_t staked_coins = get_staked_coins(NETWORK_CONTRACT, wallet_address);
+
+                                    if (staked_coins != staked_coins_voted)
+                                    {
+                                        value -= staked_coins_voted;
+                                        value += staked_coins;
+                                    }
+
+                                    db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
+                                }
+                            }
+
                             value += add_amount;
                             value -= remove_amount;
                             (*map)[contract_id] = boost::lexical_cast<std::string>(value);
@@ -81,6 +120,24 @@ namespace
                         // The key exists in the map
                         std::string value_str = (*inner_map)[contract_id];
                         uint256_t value = boost::lexical_cast<uint256_t>(value_str);
+
+                        if (contract_id == NETWORK_CONTRACT)
+                        {
+                            std::string staked_coins_voted_data;
+                            if (db_staked_coins_voted::get_single(staked_coins_voted_key, staked_coins_voted_data))
+                            {
+                                uint256_t staked_coins_voted = boost::lexical_cast<uint256_t>(staked_coins_voted_data);
+                                uint256_t staked_coins = get_staked_coins(NETWORK_CONTRACT, wallet_address);
+
+                                if (staked_coins != staked_coins_voted)
+                                {
+                                    value -= staked_coins_voted;
+                                    value += staked_coins;
+                                }
+                                db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
+                            }
+                        }
+
                         value += add_amount;
                         value -= remove_amount;
                         (*inner_map)[contract_id] = boost::lexical_cast<std::string>(value);
@@ -369,7 +426,7 @@ ZeraStatus balance_tracker::subtract_txn_balance_transfer(const google::protobuf
         {
             processed_batch.Put(balance_key, balance_tracker.SerializeAsString());
             db_processed_wallets::store_batch(processed_batch);
-            std::string message = "balance_tracker.cpp: subtract_txn_balances: Invalid wallet address. : " + amount.str();
+            std::string message = "balance_tracker.cpp: subtract_txn_balance_transfer: Invalid wallet address. : " + amount.str();
             return ZeraStatus(ZeraStatus::BLOCK_FAULTY_TXN, message, zera_txn::TXN_STATUS::INVALID_WALLET_ADDRESS);
         }
 
@@ -414,7 +471,7 @@ ZeraStatus balance_tracker::subtract_txn_balance(const std::string &wallet_addre
 
         if (balance < amount)
         {
-            std::string message = "Wallet_adr: " +  base58_encode(wallet_address) + contract_id + "\nbalance_tracker.cpp: subtract_txn_balances: Insufficient wallet balance.";
+            std::string message = "Wallet_adr: " + base58_encode(wallet_address) + contract_id + "\nbalance_tracker.cpp: subtract_txn_balances: Insufficient wallet balance.";
             return ZeraStatus(ZeraStatus::BLOCK_FAULTY_TXN, message, zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);
         }
 
@@ -424,6 +481,7 @@ ZeraStatus balance_tracker::subtract_txn_balance(const std::string &wallet_addre
     else
     {
         std::string message = "balance_tracker.cpp: subtract_txn_balances: Invalid wallet address. : " + amount.str();
+        logging::print("balance_tracker.cpp: subtract_txn_balances: Invalid wallet address. : " + base58_encode(wallet_address), true);
 
         return ZeraStatus(ZeraStatus::BLOCK_FAULTY_TXN, message, zera_txn::TXN_STATUS::INVALID_WALLET_ADDRESS);
     }

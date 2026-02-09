@@ -108,7 +108,7 @@ ZeraStatus block_process::process_txn<zera_txn::ExpenseRatioTXN>(const zera_txn:
         return status;
     }
 
-    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address);
+    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address, sc_txn);
     
     if (!status.ok())
     {

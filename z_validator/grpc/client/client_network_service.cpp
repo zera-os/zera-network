@@ -83,4 +83,9 @@ grpc::Status ClientNetworkServiceImpl::Allowance(grpc::ServerContext *context, c
     return RecieveRequest(context, request, response);
 }
 
+grpc::Status ClientNetworkServiceImpl::ProposalCancel(grpc::ServerContext *context, const zera_txn::ProposalCancelTXN *request, google::protobuf::Empty *response)
+{
+    return RecieveRequest(context, request, response);
+}
+
 

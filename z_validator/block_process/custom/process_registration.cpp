@@ -17,7 +17,7 @@ namespace
     uint256_t get_wallet_balance(const zera_txn::Validator &validator, const std::string &contract_id)
     {
         uint256_t cur_equiv;
-        if(!zera_fees::get_cur_equiv(contract_id, cur_equiv))
+        if(!zera_fees::get_cur_equiv_validator(contract_id, cur_equiv))
         {
             return 0;
         }
@@ -35,7 +35,7 @@ namespace
         return convert_to_cur_equiv(cur_equiv, amount, contract_id);
     }
 
-    ZeraStatus process_registration_fees(const zera_txn::ValidatorRegistration *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const zera_txn::PublicKey &public_key, const std::string &fee_address)
+    ZeraStatus process_registration_fees(const zera_txn::ValidatorRegistration *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const zera_txn::PublicKey &public_key, const std::string &fee_address, const bool &sc_txn)
     {
         uint256_t fee_type = get_txn_fee(txn_type);
 
@@ -55,14 +55,23 @@ namespace
         }
         // calculate the fees that need to be paid, and verify they have authorized enough coin to pay it
         uint256_t txn_fee_amount;
-        status = zera_fees::calculate_fees(usd_equiv, fee_type, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, contract.coin_denomination().amount(), public_key);
+        status = zera_fees::calculate_fees(usd_equiv, fee_type, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, contract.coin_denomination().amount(), public_key, contract.contract_id());
 
         if (!status.ok())
         {
             return status;
         }
 
-        std::string wallet_key = wallets::generate_wallet(public_key);
+        //CHANGELOG: added sc_fee address for sc_txns
+        std::string wallet_key;
+        if(sc_txn)
+        {
+            wallet_key = txn->base().sc_fee_address();
+        }
+        else
+        {
+            wallet_key = wallets::generate_wallet(public_key);
+        }
 
         status = zera_fees::process_fees(contract, txn_fee_amount, wallet_key, contract.contract_id(), true, status_fees, txn->base().hash(), fee_address);
 
@@ -198,7 +207,7 @@ ZeraStatus block_process::process_txn<zera_txn::ValidatorRegistration>(const zer
     std::string pub_key_str = wallets::get_public_key_string(txn->validator().public_key());
     KeyType key_type = signatures::get_key_type(pub_key_str);
 
-    if (original_hash_type == HashType::wallet_r || original_hash_type == HashType::wallet_g || original_hash_type == HashType::wallet_sc || key_type == KeyType::ERROR_TYPE)
+    if (original_hash_type == HashType::wallet_r || original_hash_type == HashType::wallet_g || original_hash_type == HashType::wallet_sc || original_hash_type == HashType::wallet_scd || key_type == KeyType::ERROR_TYPE)
     {
         return ZeraStatus(ZeraStatus::BLOCK_FAULTY_TXN, "process_registration.cpp: process_txn: Original validator key is not accepted.", zera_txn::TXN_STATUS::VALIDATOR_ADDRESS);
     }
@@ -206,7 +215,8 @@ ZeraStatus block_process::process_txn<zera_txn::ValidatorRegistration>(const zer
     HashType gen_hash_type = wallets::get_wallet_type(txn->base().public_key());
     std::string pub_key_str_gen = wallets::get_public_key_string(txn->base().public_key());
     KeyType key_type_gen = signatures::get_key_type(pub_key_str_gen);
-    if (gen_hash_type == HashType::wallet_r || gen_hash_type == HashType::wallet_g || gen_hash_type == HashType::wallet_sc || key_type_gen == KeyType::ERROR_TYPE)
+    
+    if (gen_hash_type == HashType::wallet_r || gen_hash_type == HashType::wallet_g || gen_hash_type == HashType::wallet_sc || gen_hash_type == HashType::wallet_scd || key_type_gen == KeyType::ERROR_TYPE)
     {
         return ZeraStatus(ZeraStatus::BLOCK_FAULTY_TXN, "process_registration.cpp: process_txn: Generated public key is not accepted.", zera_txn::TXN_STATUS::VALIDATOR_ADDRESS);
     }
@@ -218,7 +228,7 @@ ZeraStatus block_process::process_txn<zera_txn::ValidatorRegistration>(const zer
         return status;
     }
 
-    status = process_registration_fees(txn, status_fees, txn_type, txn->validator().public_key(), fee_address);
+    status = process_registration_fees(txn, status_fees, txn_type, txn->validator().public_key(), fee_address, sc_txn);
 
     if (!status.ok())
     {

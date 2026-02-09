@@ -206,8 +206,11 @@ namespace
         {
             hash_tokens.push_back(item);
         }
-        if (hash_tokens.size() < 0)
+        if (hash_tokens.size() == 0)
         {
+            // std::vector<uint8_t> public_key_vec(extract_pub_key.begin(), extract_pub_key.end());
+            // public_key_vec = hash_pk(HashType::hash_c, public_key_vec);
+            // return std::string(public_key_vec.begin(), public_key_vec.end());
             return "";
         }
 
@@ -295,12 +298,27 @@ namespace
                 wallet_address = wallet_address.substr(3);
             }
         }
+        else if (type == HashType::wallet_scd)
+        {
+            if (wallet_address.length() > 4)
+            {
+                wallet_address = wallet_address.substr(4);
+            }
+        }
         else
         {
             return "";
         }
-        auto vec = Hashing::sha256_hash(wallet_address);
-        std::string hash = std::string(vec.begin(), vec.end());
+        std::string hash;
+        if(type != HashType::wallet_scd)
+        {
+            auto vec = Hashing::sha256_hash(wallet_address);
+            hash = std::string(vec.begin(), vec.end());
+        }
+        else
+        {
+            hash = wallet_address;
+        }
 
         return hash + transfer_symbol;
     }
@@ -419,6 +437,10 @@ HashType wallets::get_wallet_type(std::string pub_key)
     {
         wallet_type = HashType::wallet_sc;
     }
+    else if (wallet_pref == "scd")
+    {
+        wallet_type = HashType::wallet_scd;
+    }
 
     return wallet_type;
 }
@@ -514,9 +536,9 @@ std::string wallets::generate_wallet_single(const std::string &public_key, const
     {
         hash_tokens.push_back(item);
     }
-    if (hash_tokens.size() <= 0)
+    if (hash_tokens.size() == 0)
     {
-        return "";
+        return extract_pub_key + transfer_symbol;
     }
 
     std::string wallet_adr = multi_hash(hash_tokens, extract_pub_key);

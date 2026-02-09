@@ -45,6 +45,8 @@ namespace
             return true;
         case zera_txn::TRANSACTION_TYPE::ALLOWANCE_TYPE:
             return true;
+        case zera_txn::TRANSACTION_TYPE::PROPOSAL_CANCEL_TYPE:
+            return true;
         default:
             return false;
         }
@@ -223,6 +225,7 @@ template ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::Itemi
 template ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::GovernanceProposal>(const zera_txn::GovernanceProposal *txn, zera_txn::InstrumentContract &contract, const zera_txn::TRANSACTION_TYPE &txn_type, const bool timed);
 template ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::ExpenseRatioTXN>(const zera_txn::ExpenseRatioTXN *txn, zera_txn::InstrumentContract &contract, const zera_txn::TRANSACTION_TYPE &txn_type, const bool timed);
 template ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::AllowanceTXN>(const zera_txn::AllowanceTXN *txn, zera_txn::InstrumentContract &contract, const zera_txn::TRANSACTION_TYPE &txn_type, const bool timed);
+template ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *txn, zera_txn::InstrumentContract &contract, const zera_txn::TRANSACTION_TYPE &txn_type, const bool timed);
 
 template <>
 ZeraStatus restricted_keys_check::check_restricted_keys<zera_txn::CoinTXN>(const zera_txn::CoinTXN *txn, zera_txn::InstrumentContract &contract, const zera_txn::TRANSACTION_TYPE &txn_type, const bool timed)

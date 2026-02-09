@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "smart_contract_sender_data.h"
 #include "fees.h"
+#include "nf_helpers.h"
 
 //*************************************************************
 //                          Transfer
@@ -27,12 +28,15 @@ namespace
     {
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t priority_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv);
+        if(priority_equiv == 1)
         {
             priority_equiv = ONE_DOLLAR;
         }
@@ -46,15 +50,19 @@ namespace
         perc_fee_amount = amount * contract_fee / quintillion;
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t txn_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, txn_equiv);
+        if(txn_equiv == 1)
         {
             txn_equiv = ONE_DOLLAR;
         }
+
 
         perc_fee_amount = (perc_fee_amount * txn_equiv) / fee_equiv;
     }
@@ -86,7 +94,8 @@ namespace
         uint256_t contract_fee(contract.contract_fees().fee());
         uint256_t denomination(contract.coin_denomination().amount());
         uint256_t contract_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv);
+        if(contract_equiv == 1)
         {
             contract_equiv = ONE_DOLLAR;
         }
@@ -98,10 +107,12 @@ namespace
             // contract fee has quintillion multiplier
             // fee_equiv has 1 quintillion multiplier
             uint256_t fee_equiv;
-            if(!zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv))
+            zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv);
+            if(fee_equiv == 1)
             {
                 fee_equiv = ONE_DOLLAR;
             }
+
             contract_fee_amount = (contract_fee * denomination) / fee_equiv;
             break;
         }
@@ -122,41 +133,6 @@ namespace
 
         txn->set_contract_fee_amount(contract_fee_amount.str());
         return true;
-    }
-    void calc_fee(zera_txn::CoinTXN *txn)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
-        uint256_t txn_fee_amount;
-
-        uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::COIN_TYPE));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination) / equiv;
-
-        for (auto public_key : txn->auth().public_key())
-        {
-            uint256_t key_fee = get_key_fee(public_key);
-            txn_fee_amount += (key_fee * denomination) / equiv;
-        }
-
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("1000000000000");
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
     }
 
     void set_auth(zera_txn::TransferAuthentication *auth, SenderDataType &sender)
@@ -227,10 +203,11 @@ namespace
         {
             return "FAILED: Did not calculate contract fee";
         }
-
-        calc_fee(&txn);
+        uint256_t txn_fee_amount;
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
 
         txn.set_contract_id(contract_id);
+
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -246,7 +223,7 @@ WasmEdge_Result Transfer(void *Data, const WasmEdge_CallingFrameContext *CallFra
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -326,7 +303,7 @@ WasmEdge_Result Transfer(void *Data, const WasmEdge_CallingFrameContext *CallFra
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::string status = create_transfer(sender, contract_id, amount, wallet_string);
+    std::string status = create_transfer(*sender, contract_id, amount, wallet_string);
 
     const char *val = status.c_str();
     const size_t len = status.length();

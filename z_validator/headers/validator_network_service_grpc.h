@@ -68,6 +68,7 @@ public:
     grpc::Status ValidatorCoin(grpc::ServerContext *context, const zera_txn::CoinTXN *request, google::protobuf::Empty *response) override;
     grpc::Status ValidatorSmartContractInstantiate(grpc::ServerContext *context, const zera_txn::SmartContractInstantiateTXN *request, google::protobuf::Empty *response) override;
     grpc::Status ValidatorAllowance(grpc::ServerContext *context, const zera_txn::AllowanceTXN *request, google::protobuf::Empty *response) override;
+    grpc::Status ValidatorProposalCancel(grpc::ServerContext *context, const zera_txn::ProposalCancelTXN *request, google::protobuf::Empty *response) override;
 
     grpc::Status IndexerVoting(grpc::ServerContext *context, const zera_validator::IndexerVotingRequest *request, zera_validator::IndexerVotingResponse *response) override;
     grpc::Status Nonce(grpc::ServerContext *context, const zera_validator::NonceRequest *request, zera_validator::NonceResponse *response) override;

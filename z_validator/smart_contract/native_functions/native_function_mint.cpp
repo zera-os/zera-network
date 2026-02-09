@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "smart_contract_sender_data.h"
 #include "fees.h"
+#include "nf_helpers.h"
 
 //*************************************************************
 //                          Mint
@@ -23,86 +24,6 @@
 
 namespace
 {
-    void calc_fee(zera_txn::MintTXN *txn)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv(NETWORK_CONTRACT, equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract(NETWORK_CONTRACT, fee_contract);
-
-        uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::MINT_TYPE));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-        int256_t txn_fee_amount;
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination)  / equiv;
-
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-        base->set_fee_amount("1000000000000");
-        base->set_nonce(sender.sc_nonce);
-        sender.sc_nonce++;
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-
-    }
-
-    void current_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        size_t call_size = sender.wallet_chain.size();
-        int call_index = call_size - 1;
-
-        std::string sc_auth = "sc_" + sender.current_smart_contract_instance;
-
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("1000000000000");
-        base->set_nonce(sender.sc_nonce);
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        sender.sc_nonce++;
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-
-    }
-
-    bool delegate_set_base(zera_txn::BaseTXN *base, SenderDataType &sender, const std::string &delegate_wallet)
-    {
-        std::string sc_auth = "";
-
-        int x = 0;
-        for(auto &wallet : sender.wallet_chain)
-        {
-            if(delegate_wallet == wallet)
-            {
-                sc_auth = "sc_" + sender.call_chain[x];
-                break;
-            }
-            x++;
-        }
-
-        if(sc_auth == "")
-        {
-            return false;
-        }
-
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("1000000000000");
-        base->set_nonce(sender.sc_nonce);
-        base->set_fee_id(NETWORK_CONTRACT);
-        base->set_safe_send(false);
-        sender.sc_nonce++;
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-
-        return true;
-    }
 
     std::string process_txn(SenderDataType &sender, const zera_txn::MintTXN &txn)
     {
@@ -136,7 +57,7 @@ namespace
         txn.set_recipient_address(wallet);
         txn.set_contract_id(contract_id);
 
-        calc_fee(&txn);
+        calc_fee(base, sender.fee_id, txn.ByteSize(), zera_txn::TRANSACTION_TYPE::MINT_TYPE, wallet, contract_id);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -157,7 +78,7 @@ namespace
         txn.set_recipient_address(wallet);
         txn.set_contract_id(contract_id);
 
-        calc_fee(&txn);
+        calc_fee(base, sender.fee_id, txn.ByteSize(), zera_txn::TRANSACTION_TYPE::MINT_TYPE, wallet, contract_id);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -172,7 +93,9 @@ namespace
 
         zera_txn::BaseTXN *base = txn.mutable_base();
 
-        if(!delegate_set_base(base, sender, delegate_wallet))
+        std::string sc_auth;
+
+        if(!delegate_set_base(base, sender, delegate_wallet, sc_auth))
         {
             return "FAILED: Delegate wallet not found";
         }
@@ -181,7 +104,7 @@ namespace
         txn.set_recipient_address(wallet);
         txn.set_contract_id(contract_id);
 
-        calc_fee(&txn);
+        calc_fee(base, sender.fee_id, txn.ByteSize(), zera_txn::TRANSACTION_TYPE::MINT_TYPE, wallet, contract_id);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -197,7 +120,7 @@ WasmEdge_Result Mint(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -274,12 +197,10 @@ WasmEdge_Result Mint(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
     }
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
-    std::string status = create_mint(sender, contract_id, amount, wallet_string);
+    std::string status = create_mint(*sender, contract_id, amount, wallet_string);
 
     const char *val = status.c_str();
     const size_t len = status.length();
-
-    auto fee_address = sender.fee_address;
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);
@@ -294,7 +215,7 @@ WasmEdge_Result DelegateMint(void *Data, const WasmEdge_CallingFrameContext *Cal
      * Returns: {i32}
      */
     logging::print("[DelegateMint] Start");
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -393,7 +314,7 @@ WasmEdge_Result DelegateMint(void *Data, const WasmEdge_CallingFrameContext *Cal
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
     std::string delegate_wallet_string(delegate_wallet_decode.begin(), delegate_wallet_decode.end());
-    std::string status = delegate_create_mint(sender, contract_id, amount, wallet_string, delegate_wallet_string);
+    std::string status = delegate_create_mint(*sender, contract_id, amount, wallet_string, delegate_wallet_string);
 
     const char *val = status.c_str();
     const size_t len = status.length();
@@ -410,7 +331,7 @@ WasmEdge_Result CurrentMint(void *Data, const WasmEdge_CallingFrameContext *Call
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -487,12 +408,10 @@ WasmEdge_Result CurrentMint(void *Data, const WasmEdge_CallingFrameContext *Call
     }
 
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
-    std::string status = current_create_mint(sender, contract_id, amount, wallet_string);
+    std::string status = current_create_mint(*sender, contract_id, amount, wallet_string);
 
     const char *val = status.c_str();
     const size_t len = status.length();
-
-    auto fee_address = sender.fee_address;
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);
