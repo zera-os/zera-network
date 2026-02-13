@@ -4,11 +4,12 @@
 #include <string>
 #include <cstdlib>
 
-constexpr int VERSION = 100001;
-
+constexpr int VERSION = 100002; //version of the validator
 //1000000000000000000 1 dollar
 //10000000000000000   1 cent
 //1 000 000 000 000 000 000 1 dollar
+//2000000000000000
+/////////
 
 //FIXED VALUES              
 const long ATTESTATION_QUORUM = 51;   //51% quorum 
@@ -49,6 +50,7 @@ inline const std::string ZERA_DEX_PROXY = "zera_dex_proxy_1<>";
 inline const std::string ZERA_DEX_LP = "zera_dex_proxy_1<>LP_25$ZRA+0000";
 inline const std::string RESTRICTED_PROXY = "restricted_symbols_proxy_1<>RESTRICTED_SC";
 inline const std::string CIRCULATING_SUPPLY_CONTRACT = "circulating_supply_proxy_1<>WHITELIST_SC";
+inline const std::string STAKING_PROXY_CONTRACT = "staking_proxy_1<>";
 inline const std::string STAKED_COINS_CONTRACT = "staking_proxy_1<>SMART_CONTRACT_";
 inline const std::string TOKEN_WHITELIST = "network_values_proxy_1<>TOKEN_WHITELIST";
 inline const std::string OPTION_BLACKLIST = "network_values_proxy_1<>OPTION_BLACKLIST";

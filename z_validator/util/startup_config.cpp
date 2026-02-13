@@ -154,6 +154,7 @@ namespace
         if (ValidatorConfig::get_register() == "reset")
         {
 
+            logging::print("Resetting validator configuration.", true);
             return true;
         }
 

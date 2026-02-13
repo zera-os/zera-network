@@ -497,48 +497,49 @@ WasmEdge_Result DelegateClearState(void *Data, const WasmEdge_CallingFrameContex
   }
 }
 
-// WasmEdge_Result GetAllStates(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
-// {
-//   uint32_t DelegateKeyPointer = WasmEdge_ValueGetI32(In[0]);
-//   uint32_t DelegateKeySize = WasmEdge_ValueGetI32(In[1]);
-//   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
+WasmEdge_Result GetAllStates(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+  uint32_t DelegateKeyPointer = WasmEdge_ValueGetI32(In[0]);
+  uint32_t DelegateKeySize = WasmEdge_ValueGetI32(In[1]);
+  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-//   std::vector<unsigned char> DelegateKey(DelegateKeySize);
+  std::vector<unsigned char> DelegateKey(DelegateKeySize);
 
-//   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-//   WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateKey.data(), DelegateKeyPointer, DelegateKeySize);
-//   std::string delegate_key;
-//   if (WasmEdge_ResultOK(Res))
-//   {
-//     std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
-//     delegate_key = delegate_keyString;
-//   }
-//   else
-//   {
-//     return Res;
-//   }
+  WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateKey.data(), DelegateKeyPointer, DelegateKeySize);
+  std::string delegate_key;
+  if (WasmEdge_ResultOK(Res))
+  {
+    std::string delegate_keyString(reinterpret_cast<char *>(DelegateKey.data()), DelegateKeySize);
+    delegate_key = delegate_keyString;
+  }
+  else
+  {
+    return Res;
+  }
 
-//   std::vector<std::string> keys;
-//   std::vector<std::string> values;
-//   std::string return_data;
+  std::vector<std::string> keys;
+  std::vector<std::string> values;
+  std::string return_data;
 
-//   if(db_smart_contracts::find_by_prefix(delegate_key + "_", keys, values) < 1)
-//   {
-//     return_data = "";
-//   }
-//   else
-//   {
-//     for(size_t i = 0; i < keys.size(); i++)
-//     {
-//       return_data += keys[i] + "\n" + values[i] + "\n";
-//     }
-//   }
+  std::string smart_contract_key = delegate_key + "<>";
+  if(db_smart_contract_states::find_by_prefix(smart_contract_key, keys, values) < 1)
+  {
+    return_data = "";
+  }
+  else
+  {
+    for(size_t i = 0; i < keys.size(); i++)
+    {
+      return_data += keys[i].substr(smart_contract_key.length()) + "\n" + values[i] + "\n";
+    }
+  }
 
-//   const char *val = return_data.c_str();
-//   const size_t len = return_data.length();
+  const char *val = return_data.c_str();
+  const size_t len = return_data.length();
 
-//   WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-//   Out[0] = WasmEdge_ValueGenI32(len);
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
 
-//   return WasmEdge_Result_Success;
-// }
+  return WasmEdge_Result_Success;
+}

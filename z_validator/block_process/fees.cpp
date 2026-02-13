@@ -304,7 +304,7 @@ ZeraStatus zera_fees::process_fees(const zera_txn::InstrumentContract &contract,
     {
         validator_fee_address = current_validator_address;
     }
-
+    
     auto tres_wallet_vec = base58_decode(ValidatorConfig::get_treasury_wallet());
     std::string treasury_wallet(tres_wallet_vec.begin(), tres_wallet_vec.end());
 

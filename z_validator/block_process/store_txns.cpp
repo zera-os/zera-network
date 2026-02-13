@@ -758,6 +758,7 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
         validator_utils::archive_balances(block_height);
     }
 
+    
     if (backup)
     {
         Reorg::backup_blockchain(block_height);

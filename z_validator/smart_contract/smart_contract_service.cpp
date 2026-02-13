@@ -1469,6 +1469,13 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_DerivedSendMulti, sizeof(ReturnList_DerivedSendMulti) / sizeof(ReturnList_DerivedSendMulti[0]),
                      DerivedSendMulti, "derived_send_multi");
 
+  enum WasmEdge_ValType ParamList_GetAllStates[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_GetAllStates[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_GetAllStates, sizeof(ParamList_GetAllStates) / sizeof(ParamList_GetAllStates[0]),
+                     ReturnList_GetAllStates, sizeof(ReturnList_GetAllStates) / sizeof(ReturnList_GetAllStates[0]),
+                     GetAllStates, "get_all_states");
+
   return HostModCxt;
 }
 

@@ -135,6 +135,35 @@ namespace
 
         return 100;
     }
+
+    uint256_t get_instant_stake_coins(const std::string &wallet_address)
+    {
+
+        uint256_t staked_coins = 0;
+    
+        std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "INSTANT_STAKES_" + wallet_address;
+    
+        std::string wallet_stake_data;
+    
+        if(!db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
+        {
+            return 0;
+        }
+
+        AllWalletInstantStakes all_wallet_stakes = decode_all_wallet_instant_stakes(wallet_stake_data);
+    
+        for(auto stake : all_wallet_stakes.staker_states)
+        {
+            InstantStake wallet_stake = stake.second;
+            std::string term = wallet_stake.term;
+    
+            uint256_t multiplier = get_multiplier(term);
+    
+            staked_coins += (wallet_stake.principle * multiplier) / 100;
+        }    
+    
+        return staked_coins;
+    }
 }
 
 uint256_t get_key_fee(const zera_txn::PublicKey &pk)
@@ -449,50 +478,21 @@ uint256_t get_staked_coins(const std::string &contract_id, const std::string &wa
     }
     uint256_t staked_coins = 0;
 
-    std::string staked_coins_data;
-
-    if(!db_smart_contract_states::get_single(STAKED_COINS_CONTRACT, staked_coins_data))
-    {
-        logging::print("Failed to get staked coins data for contract: " + contract_id);
-        return 0;
-    }
-
-    SmartContractState staked_sc = decode_smart_contract_state(staked_coins_data);
-
-    std::string all_stakers_key = staked_sc.smart_contract + "_" + staked_sc.instance + "<>ALL_STAKERS_";
-    
-    std::string all_stakers_data;
-
-    if(!db_smart_contract_states::get_single(all_stakers_key, all_stakers_data))
-    {
-        logging::print("Failed to get all stakers");
-        return 0;
-    }
-
-    AllStakers all_stakers = decode_all_stakers(all_stakers_data);
-
-
-    if(all_stakers.staker_states.count(wallet_address) == 0)
-    {
-        logging::print("Wallet address not found in all stakers");
-        return 0;
-    }
-
-    std::string wallet_stake_key = staked_sc.smart_contract + "_" + staked_sc.instance + "<>WALLET_STAKE__" + wallet_address;
+    std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "WALLET_STAKE__" + wallet_address;
 
     std::string wallet_stake_data;
 
     if(!db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
     {
-        logging::print("Failed to get wallet stake data for wallet: " + wallet_address);
         return 0;
     }
+
     AllWalletStakes all_wallet_stakes = decode_all_wallet_stakes(wallet_stake_data);
 
     for(auto stake : all_wallet_stakes.staker_states)
     {
-        std::string term = stake.first;
         WalletStake wallet_stake = stake.second;
+        std::string term = wallet_stake.term;
 
         uint256_t multiplier = get_multiplier(term);
 
@@ -500,6 +500,8 @@ uint256_t get_staked_coins(const std::string &contract_id, const std::string &wa
     }
 
     staked_coins += (all_wallet_stakes.liquid_stake.principle * 105) / 100;
+
+    staked_coins += get_instant_stake_coins(wallet_address);
 
     return staked_coins;
 }

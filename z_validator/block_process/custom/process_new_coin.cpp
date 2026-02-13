@@ -718,7 +718,6 @@ namespace
             }
 
             int x = 0;
-            //TODO - check about allowance nonce for smart contract txn
             if(sc_txn)
             {
                 return ZeraStatus();

@@ -157,7 +157,7 @@ namespace
         std::map<std::string, std::string> derived_wallets;
 
         try
-        {
+        {   
             std::vector<std::any> results = smart_contract_service::eval(sender_pub_key, sender_wallet_adr,
                                                                          instance_name, db_contract.binary_code(),
                                                                          db_contract.language(), txn->function(),
@@ -166,6 +166,7 @@ namespace
                                                                          block_txns_key, fee_address,
                                                                          smart_contract_wallet, gas_approved,
                                                                          used_gas, txn_hashes, derived_wallets, db_contract.sc_fees(), txn->base().fee_id());
+
 
             // store result
             std::string event_data = "";

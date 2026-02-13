@@ -1,11 +1,16 @@
 #include "startup_config.h"
 #include "logging.h"
 #include "block_process.h"
+#include "db_base.h"
+#include <rocksdb/write_batch.h>
+#include "reorg.h"
+
+#include "base64.h"
 
 int main()
 {
 
-    if(!startup_config::configure_startup())
+    if (!startup_config::configure_startup())
     {
         logging::print("Startup configuration failed, exiting.");
         return -1;

@@ -46,7 +46,6 @@ namespace
             {
                 std::string auth = auth_id.substr(4);
                 std::string contract_data;
-                // TODO - remove this
 
                 if (!db_contracts::get_single(auth, contract_data) || !gov_contract.ParseFromString(contract_data))
                 {

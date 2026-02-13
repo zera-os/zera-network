@@ -81,7 +81,6 @@ namespace
     ZeraStatus mint(const zera_txn::MintTXN *txn, zera_txn::InstrumentContract &contract)
     {
 
-        //TODO - inspect this
         std::string contract_id = txn->contract_id();
         if(contract_id.substr(0, 5) == "$sol-")
         {

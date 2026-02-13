@@ -5,6 +5,7 @@
 #include <map>
 
 std::string base64_decode(const std::string& encoded);
+std::string base64_encode(const std::string& data);
 
 // Postcard deserialization helpers
 struct SmartContractState {
@@ -22,6 +23,7 @@ struct WalletStake {
     uint64_t daily_release;
     uint64_t total_released;
     uint64_t last_reward_day;
+    std::string term;
 };
 
 struct LiquidStake {
@@ -31,7 +33,6 @@ struct LiquidStake {
     uint64_t daily_release;
     uint64_t unstake_day;
 };
-//LP_$ZRA+0000$sol-SOL+00000010
 
 struct AllWalletStakes {
     std::map<std::string, WalletStake> staker_states;
@@ -55,8 +56,29 @@ struct NetworkValues {
     std::vector<std::string> values;
 };
 
+struct InstantStake {
+    uint64_t principle;
+    uint64_t total_reward;
+    uint64_t release_day;
+    std::string term;
+};
+
+struct AllInstantStakers {
+    std::map<std::string, uint8_t> staker_states;
+    uint64_t earliest_release_day;
+};
+
+struct AllWalletInstantStakes {
+    std::map<std::string, InstantStake> staker_states;
+};
+
 SmartContractState decode_smart_contract_state(const std::string& b64_encoded);
 AllStakers decode_all_stakers(const std::string& b64_encoded);
 AllWalletStakes decode_all_wallet_stakes(const std::string& b64_encoded);
 LiquidityPool decode_liquidity_pool(const std::string& b64_encoded);
 NetworkValues decode_network_values(const std::string& b64_encoded);
+AllInstantStakers decode_all_instant_stakers(const std::string& b64_encoded);
+AllWalletInstantStakes decode_all_wallet_instant_stakes(const std::string& b64_encoded);
+
+std::string encode_smart_contract_state(const SmartContractState& state);
+std::string base64_encode(const std::string& data);

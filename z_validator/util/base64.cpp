@@ -64,6 +64,7 @@ namespace
         stake.daily_release = read_u64(data, pos);
         stake.total_released = read_u64(data, pos);
         stake.last_reward_day = read_u64(data, pos);
+        stake.term = read_postcard_string(data, pos);
         return stake;
     }
 
@@ -79,6 +80,17 @@ namespace
         return liquid;
     }
 
+    // Helper: Read InstantStake from postcard format
+    InstantStake read_instant_stake(const std::string &data, size_t &pos)
+    {
+        InstantStake stake;
+        stake.principle = read_u64(data, pos);
+        stake.total_reward = read_u64(data, pos);
+        stake.release_day = read_u64(data, pos);
+        stake.term = read_postcard_string(data, pos);
+        return stake;
+    }
+
     // Helper: Read bool from postcard format
     bool read_bool(const std::string &data, size_t &pos)
     {
@@ -87,6 +99,24 @@ namespace
         
         uint8_t byte = static_cast<uint8_t>(data[pos++]);
         return byte != 0;
+    }
+
+    // Helper: Write varint (LEB128 encoding for postcard)
+    void write_varint(std::string &output, size_t value)
+    {
+        while (value >= 0x80)
+        {
+            output.push_back(static_cast<char>((value & 0x7F) | 0x80));
+            value >>= 7;
+        }
+        output.push_back(static_cast<char>(value & 0x7F));
+    }
+
+    // Helper: Write string in postcard format (length prefix + data)
+    void write_postcard_string(std::string &output, const std::string &str)
+    {
+        write_varint(output, str.size());
+        output.append(str);
     }
 
 }
@@ -232,6 +262,87 @@ NetworkValues decode_network_values(const std::string &b64_encoded)
     return network_values;
 }
 
+// Decode AllInstantStakers from base64 + postcard format
+AllInstantStakers decode_all_instant_stakers(const std::string &b64_encoded)
+{
+    AllInstantStakers stakers;
+
+    // Step 1: Base64 decode
+    std::string postcard_bytes = base64_decode(b64_encoded);
+    if (postcard_bytes.empty())
+        return stakers; // Decode failed
+
+    // Step 2: Deserialize postcard format
+    size_t pos = 0;
+
+    // Read the HashMap (staker_states)
+    size_t num_entries = read_varint(postcard_bytes, pos);
+
+    for (size_t i = 0; i < num_entries && pos < postcard_bytes.size(); ++i)
+    {
+        // Read the key (string)
+        std::string key = read_postcard_string(postcard_bytes, pos);
+
+        // Read the value (u8)
+        if (pos >= postcard_bytes.size())
+            break; // Invalid data
+
+        uint8_t value = static_cast<uint8_t>(postcard_bytes[pos++]);
+
+        // Add to map
+        stakers.staker_states[key] = value;
+    }
+
+    // Read the earliest_release_day (u64)
+    stakers.earliest_release_day = read_u64(postcard_bytes, pos);
+
+    return stakers;
+}
+
+// Decode AllWalletInstantStakes from base64 + postcard format
+AllWalletInstantStakes decode_all_wallet_instant_stakes(const std::string &b64_encoded)
+{
+    AllWalletInstantStakes all_stakes;
+
+    // Step 1: Base64 decode
+    std::string postcard_bytes = base64_decode(b64_encoded);
+    if (postcard_bytes.empty())
+        return all_stakes; // Decode failed
+
+    // Step 2: Deserialize postcard format
+    size_t pos = 0;
+
+    // Read the HashMap (staker_states)
+    size_t num_entries = read_varint(postcard_bytes, pos);
+
+    for (size_t i = 0; i < num_entries && pos < postcard_bytes.size(); ++i)
+    {
+        // Read the key (string)
+        std::string key = read_postcard_string(postcard_bytes, pos);
+
+        // Read the value (InstantStake)
+        InstantStake stake = read_instant_stake(postcard_bytes, pos);
+
+        // Add to map
+        all_stakes.staker_states[key] = stake;
+    }
+
+    return all_stakes;
+}
+
+// Encode SmartContractState to base64 + postcard format
+std::string encode_smart_contract_state(const SmartContractState &state)
+{
+    std::string postcard_bytes;
+
+    // Serialize fields in order matching Rust struct
+    write_postcard_string(postcard_bytes, state.smart_contract);
+    write_postcard_string(postcard_bytes, state.instance);
+
+    // Base64 encode
+    return base64_encode(postcard_bytes);
+}
+
 std::string base64_decode(const std::string &encoded)
 {
     static const std::string base64_chars =
@@ -282,4 +393,39 @@ std::string base64_decode(const std::string &encoded)
     }
 
     return decoded;
+}
+
+std::string base64_encode(const std::string &data)
+{
+    static const std::string base64_chars =
+        "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        "abcdefghijklmnopqrstuvwxyz"
+        "0123456789+/";
+
+    std::string encoded;
+    int val = 0;
+    int valb = -6;
+
+    for (unsigned char c : data)
+    {
+        val = (val << 8) + c;
+        valb += 8;
+        while (valb >= 0)
+        {
+            encoded.push_back(base64_chars[(val >> valb) & 0x3F]);
+            valb -= 6;
+        }
+    }
+
+    if (valb > -6)
+    {
+        encoded.push_back(base64_chars[((val << 8) >> (valb + 8)) & 0x3F]);
+    }
+
+    while (encoded.size() % 4)
+    {
+        encoded.push_back('=');
+    }
+
+    return encoded;
 }

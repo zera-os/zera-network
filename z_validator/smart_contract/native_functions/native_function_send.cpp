@@ -486,6 +486,7 @@ WasmEdge_Result SendAll(void *Data, const WasmEdge_CallingFrameContext *CallFram
         return WasmEdge_Result_Fail;
     }
 
+
     std::string transfer_message = "[Transfer All] ";
     for (auto token : token_lookup.tokens())
     {

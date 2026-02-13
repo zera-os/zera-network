@@ -164,6 +164,7 @@ ZeraStatus restricted_keys_check::check_restricted_keys(const TXType *txn, zera_
     HashType wallet_type = wallets::get_wallet_type(txn->base().public_key());
 
     // if key is not restricted/gov/sc check to see if txn requires
+
     if (wallet_type != HashType::wallet_r && wallet_type != HashType::wallet_g && wallet_type != HashType::wallet_sc)
     {
         // if restricted key is required fail key
