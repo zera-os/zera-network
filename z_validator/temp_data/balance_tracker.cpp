@@ -59,8 +59,8 @@ namespace
                                     {
                                         value -= staked_coins_voted;
                                         value += staked_coins;
+                                        db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(staked_coins));
                                     }
-                                    db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
                                 }
                             }
 
@@ -94,9 +94,8 @@ namespace
                                     {
                                         value -= staked_coins_voted;
                                         value += staked_coins;
+                                        db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(staked_coins));
                                     }
-
-                                    db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
                                 }
                             }
 
@@ -133,8 +132,8 @@ namespace
                                 {
                                     value -= staked_coins_voted;
                                     value += staked_coins;
+                                    db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(staked_coins));
                                 }
-                                db_staked_coins_voted_temp::store_single(staked_coins_voted_key, boost::lexical_cast<std::string>(value));
                             }
                         }
 

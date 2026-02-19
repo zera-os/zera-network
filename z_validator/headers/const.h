@@ -4,7 +4,7 @@
 #include <string>
 #include <cstdlib>
 
-constexpr int VERSION = 100002; //version of the validator
+constexpr int VERSION = 100003; //version of the validator
 //1000000000000000000 1 dollar
 //10000000000000000   1 cent
 //1 000 000 000 000 000 000 1 dollar
@@ -43,7 +43,7 @@ inline const std::string IMPROVEMENT_GOVERNANCE = "gov_$ZIP+0000";
 inline const std::string FIRST_TIME_WALLET_FEE = "FIRST_TIME_WALLET_FEE";
 inline const std::string TOKEN_MULTIPLIER = "TOKEN_MULTIPLIER";
 
-inline const std::string  EVENT_MANAGEMENT_TEMP = "event_management_temp";
+inline const std::string EVENT_MANAGEMENT_TEMP = "event_management_temp";
 inline const std::string NETWORK_FEE_PROXY = "network_fee_proxy_1<>NETWORK_SC";
 inline const std::string ACE_PROXY = "zera_dex_proxy_1<>ACE_";
 inline const std::string ZERA_DEX_PROXY = "zera_dex_proxy_1<>";

@@ -6,6 +6,8 @@
 #include "reorg.h"
 
 #include "base64.h"
+#include "base58.h"
+
 
 int main()
 {

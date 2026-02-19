@@ -141,7 +141,7 @@ namespace
 
         uint256_t staked_coins = 0;
     
-        std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "INSTANT_STAKES_" + wallet_address;
+        std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "INSTANT_STAKES__" + wallet_address;
     
         std::string wallet_stake_data;
     
@@ -477,31 +477,29 @@ uint256_t get_staked_coins(const std::string &contract_id, const std::string &wa
         return 0;
     }
     uint256_t staked_coins = 0;
-
-    std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "WALLET_STAKE__" + wallet_address;
+    std::string wallet_base58 = base58_encode(wallet_address);
+    std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "WALLET_STAKE__" + wallet_base58;
 
     std::string wallet_stake_data;
 
-    if(!db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
+    if(db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
     {
-        return 0;
+        AllWalletStakes all_wallet_stakes = decode_all_wallet_stakes(wallet_stake_data);
+
+        for(auto stake : all_wallet_stakes.staker_states)
+        {
+            WalletStake wallet_stake = stake.second;
+            std::string term = wallet_stake.term;
+    
+            uint256_t multiplier = get_multiplier(term);
+    
+            staked_coins += (wallet_stake.principle * multiplier) / 100;
+        }
+    
+        staked_coins += (all_wallet_stakes.liquid_stake.principle * 105) / 100;
     }
 
-    AllWalletStakes all_wallet_stakes = decode_all_wallet_stakes(wallet_stake_data);
-
-    for(auto stake : all_wallet_stakes.staker_states)
-    {
-        WalletStake wallet_stake = stake.second;
-        std::string term = wallet_stake.term;
-
-        uint256_t multiplier = get_multiplier(term);
-
-        staked_coins += (wallet_stake.principle * multiplier) / 100;
-    }
-
-    staked_coins += (all_wallet_stakes.liquid_stake.principle * 105) / 100;
-
-    staked_coins += get_instant_stake_coins(wallet_address);
+    staked_coins += get_instant_stake_coins(wallet_base58);
 
     return staked_coins;
 }

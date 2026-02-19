@@ -213,7 +213,6 @@ namespace
         result->set_support_cur_equiv(boost::lexical_cast<std::string>(yes_amount));
         result->set_against_cur_equiv(boost::lexical_cast<std::string>(no_amount));
         result->set_passed(calculate_passed(result->support_cur_equiv(), result->against_cur_equiv(), contract, fast_quorum));
-
     }
 
     bool calculate_passed_options(const zera_txn::ProposalResult *result, const zera_txn::InstrumentContract &contract, bool fast_quorum = false)

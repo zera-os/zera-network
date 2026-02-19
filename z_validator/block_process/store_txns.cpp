@@ -751,7 +751,6 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
     remove_unbonding_validators(block->block_header());
     supply_tracker::supply_to_database();
     std::string block_height = std::to_string(block->block_header().block_height());
-
     update_proposal_heartbeat(block);
     if (archive)
     {

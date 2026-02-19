@@ -128,6 +128,7 @@ void Reorg::backup_blockchain(const std::string &block_height)
     db_fee_tokens_temp::backup_database(block_height);
     db_staked_coins_voted::backup_database(block_height);
     db_staked_coins_voted_temp::backup_database(block_height);
+    db_smart_contract_states::backup_database(block_height);
 
 
     // Note: backup_blockchain is for reorg recovery (temporary)

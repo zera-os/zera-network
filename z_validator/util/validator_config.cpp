@@ -230,7 +230,7 @@ void ValidatorConfig::set_config()
 	set_treasury_wallet(temp_treasury_wallet);
 
 	std::string temp_required_version;
-	uint32_t required_version = 100000;
+	uint32_t required_version = 100002;
 	zera_txn::RequiredVersion required_version_txn;
 	required_version_txn.add_version(required_version);
 

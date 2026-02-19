@@ -306,7 +306,7 @@ namespace
                     // The key exists in the map
                     std::string value_str = (*map)[voting_id];
                     uint256_t value = boost::lexical_cast<uint256_t>(value_str);
-
+                    
                     if (value < client_votes)
                     {
                         value = 0;
@@ -445,7 +445,6 @@ namespace
         }
 
         uint256_t staked_vote = get_staked_coins(proposal.contract_id(), wallet_adr);
-
         client_votes += staked_vote;
 
         // if proposal has option voting add amount to option
