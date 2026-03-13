@@ -35,7 +35,16 @@ namespace
         }
         block_process::get_contract(contract_id, contract);
         uint256_t denomination(contract.coin_denomination().amount());
-        uint256_t gas_used_fee = used_gas * get_fee("GAS_FEE");
+        uint256_t gas_used_fee;
+        
+        if(contract_id != NETWORK_CONTRACT)
+        {
+            gas_used_fee = used_gas * (get_fee("GAS_FEE") * get_fee("TOKEN_MULTIPLIER")) ;
+        }
+        else
+        {
+            gas_used_fee = used_gas * get_fee("GAS_FEE");
+        }
 
         uint256_t gas_used_fee_value = (gas_used_fee * denomination) / usd_equiv;
         auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
@@ -59,7 +68,17 @@ namespace
 
         uint256_t fee_left_value = (fee_left * usd_equiv) / denomination;
 
-        uint256_t gas = fee_left_value / get_fee("GAS_FEE");
+        uint256_t gas;
+
+        if(contract_id != NETWORK_CONTRACT)
+        {
+            gas = fee_left_value / (get_fee("GAS_FEE") * get_fee("TOKEN_MULTIPLIER")) ;
+        }
+        else
+        {
+            gas = fee_left_value / get_fee("GAS_FEE");
+        }
+        
         logging::print("fee_taken:", fee_taken.str());
         logging::print("gas_approved:", gas.str());
 

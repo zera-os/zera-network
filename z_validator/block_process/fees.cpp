@@ -13,16 +13,45 @@
 #include "utils.h"
 #include "../logging/logging.h"
 #include "base64.h"
+#include "sc_base64.h"
 
 
 bool zera_fees::get_cur_equiv_validator(const std::string &contract_id, uint256_t &cur_equiv)
 {
+    if(!db_contracts::exist(contract_id))
+    {
+        cur_equiv = 1;
+        return false;
+    }
+
     // Just read the pre-calculated rate from database
     std::string fee_token_key = FEE_TOKENS + contract_id;
     std::string fee_token_data;
     zera_validator::FeeToken fee_token;
 
+    std::string token_whitelist_data;
+    NetworkValues network_values;
+    std::string stable_coin_contract;
+    if (db_smart_contract_states::get_single(TOKEN_WHITELIST, token_whitelist_data) && token_whitelist_data != "")
+    {
+        network_values = decode_network_values(token_whitelist_data);
+    }
+    if (db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) && stable_coin_contract != "")
+    {
+        stable_coin_contract = STABLE_COIN_CONTRACT;
+    }
+    else
+    {
+        stable_coin_contract = STABLE_COIN_CONTRACT;
+    }
     
+    if(contract_id == stable_coin_contract)
+    {
+        cur_equiv = ONE_DOLLAR;
+        return true;
+    } 
+
+
     if(!db_fee_tokens::get_single(fee_token_key, fee_token_data) || !fee_token.ParseFromString(fee_token_data))
     {
 
@@ -31,7 +60,14 @@ bool zera_fees::get_cur_equiv_validator(const std::string &contract_id, uint256_
             cur_equiv = ONE_DOLLAR;
             return true;
         }
+
         cur_equiv = 1;
+
+        if(std::find(network_values.values.begin(), network_values.values.end(), contract_id) != network_values.values.end())
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -42,7 +78,7 @@ bool zera_fees::get_cur_equiv_validator(const std::string &contract_id, uint256_
         cur_equiv = ONE_DOLLAR;
     }
 
-    if(fee_token.whitelisted())
+    if(std::find(network_values.values.begin(), network_values.values.end(), contract_id) != network_values.values.end())
     {
         return true;
     }
@@ -56,6 +92,12 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
 {
     std::string stable_coin_contract;
 
+    if(!db_contracts::exist(contract_id))
+    {
+        cur_equiv = 1;
+        return false;
+    }
+
     if(!db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) || stable_coin_contract == "" || !db_contracts::exist(stable_coin_contract))
     {
         stable_coin_contract = STABLE_COIN_CONTRACT;
@@ -65,6 +107,14 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
     {
         cur_equiv = ONE_DOLLAR;
         return true;
+    }
+
+    std::string token_whitelist_data;
+    NetworkValues network_values;
+
+    if (db_smart_contract_states::get_single(TOKEN_WHITELIST, token_whitelist_data) && token_whitelist_data != "")
+    {
+        network_values = decode_network_values(token_whitelist_data);
     }
 
     // Just read the pre-calculated rate from database
@@ -82,6 +132,12 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
             return true;
         }
         cur_equiv = 1;
+
+        if(std::find(network_values.values.begin(), network_values.values.end(), contract_id) != network_values.values.end())
+        {
+            return true;
+        }
+
         return false;
     }
 
@@ -90,6 +146,11 @@ bool zera_fees::get_cur_equiv(const std::string &contract_id, uint256_t &cur_equ
     if(contract_id == NETWORK_CONTRACT && cur_equiv < ONE_DOLLAR)
     {
         cur_equiv = ONE_DOLLAR;
+    }
+
+    if(std::find(network_values.values.begin(), network_values.values.end(), contract_id) != network_values.values.end())
+    {
+        return true;
     }
 
     return fee_token.authorized();
