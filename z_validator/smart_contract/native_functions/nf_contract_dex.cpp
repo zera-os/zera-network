@@ -21,7 +21,7 @@ namespace
     void make_mint_key(zera_txn::InstrumentContract *txn)
     {
         zera_txn::RestrictedKey restricted_key;
-        restricted_key.mutable_public_key()->set_smart_contract_auth("sc_zera_dex_proxy_1");
+        restricted_key.mutable_public_key()->set_smart_contract_auth("sc_zera_dex_proxy_v1_1");
         restricted_key.set_mint(true);
         restricted_key.set_update_contract(true);
         restricted_key.set_transfer(true);
@@ -37,7 +37,7 @@ namespace
         block_txns.ParseFromString(value);
 
         std::string fee_address = sender.fee_address;
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, false, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
         if (status.ok())
         {
             sender.txn_hashes.push_back(txn.base().hash());
@@ -116,8 +116,9 @@ WasmEdge_Result InstrumentContractDEX(void *Data, const WasmEdge_CallingFrameCon
 {
     SenderDataType *sender = (SenderDataType *)Data;
 
-    if (sender->smart_contract_instance != "zera_dex_proxy_1")
+    if (sender->smart_contract_instance != "zera_dex_proxy_1" && sender->smart_contract_instance != "zera_dex_proxy_v1_1")
     {
+        logging::print("[InstrumentContractDEX] FAILED: Not authorized", true);
         return WasmEdge_Result_Terminate;
     }
 
@@ -140,84 +141,47 @@ WasmEdge_Result InstrumentContractDEX(void *Data, const WasmEdge_CallingFrameCon
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[10]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> Pair2Key(Pair2Size);
-    std::vector<unsigned char> PreMintKey(PreMintSize);
-    std::vector<unsigned char> PremintAmountKey(PremintAmountSize);
-    std::vector<unsigned char> FeePercentageKey(FeePercentageSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     std::string contract_id;
-
     logging::print("[InstrumentContractDEX] Res");
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[InstrumentContractBridge] Contract ID:", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[InstrumentContractBridge] Contract ID:", contract_id, true);
 
-    logging::print("[InstrumentContractDEX] Res1");
-    WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, Pair2Key.data(), Pair2Pointer, Pair2Size);
     std::string pair2;
-    if (WasmEdge_ResultOK(Res1))
+    logging::print("[InstrumentContractDEX] Res1");
+    if (!read_wasm_param(MemCxt, Pair2Pointer, Pair2Size, pair2))
     {
-        std::string pair2_temp(reinterpret_cast<char *>(Pair2Key.data()), Pair2Size);
-        pair2 = pair2_temp;
-        logging::print("[InstrumentContractDEX] Pair2:", pair2, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res1;
-    }
+    logging::print("[InstrumentContractDEX] Pair2:", pair2, true);
 
-    logging::print("[InstrumentContractDEX] Res2");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, PreMintKey.data(), PreMintPointer, PreMintSize);
     std::string pre_mint_wallet;
-    if (WasmEdge_ResultOK(Res2))
+    logging::print("[InstrumentContractDEX] Res2");
+    if (!read_wasm_param(MemCxt, PreMintPointer, PreMintSize, pre_mint_wallet))
     {
-        std::string pre_mint_temp(reinterpret_cast<char *>(PreMintKey.data()), PreMintSize);
-        pre_mint_wallet = pre_mint_temp;
-        logging::print("[InstrumentContractDEX] Pre Mint Wallet:", pre_mint_wallet, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    logging::print("[InstrumentContractDEX] Pre Mint Wallet:", pre_mint_wallet, true);
 
-    logging::print("[InstrumentContractDEX] Res3");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, PremintAmountKey.data(), PremintAmountPointer, PremintAmountSize);
     std::string premint_amount;
-    if (WasmEdge_ResultOK(Res3))
+    logging::print("[InstrumentContractDEX] Res3");
+    if (!read_wasm_param(MemCxt, PremintAmountPointer, PremintAmountSize, premint_amount))
     {
-        std::string premint_amount_temp(reinterpret_cast<char *>(PremintAmountKey.data()), PremintAmountSize);
-        premint_amount = premint_amount_temp;
-        logging::print("[InstrumentContractDEX] Premint Amount:", premint_amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[InstrumentContractDEX] Premint Amount:", premint_amount, true);
 
-    logging::print("[InstrumentContractDEX] Res4");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, FeePercentageKey.data(), FeePercentagePointer, FeePercentageSize);
     std::string fee_percentage;
-    if (WasmEdge_ResultOK(Res4))
+    logging::print("[InstrumentContractDEX] Res4");
+    if (!read_wasm_param(MemCxt, FeePercentagePointer, FeePercentageSize, fee_percentage))
     {
-        std::string fee_percentage_temp(reinterpret_cast<char *>(FeePercentageKey.data()), FeePercentageSize);
-        fee_percentage = fee_percentage_temp;
-        logging::print("[InstrumentContractDEX] Fee Percentage:", fee_percentage, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res4;
-    }
+    logging::print("[InstrumentContractDEX] Fee Percentage:", fee_percentage, true);
 
     std::string new_contract_id;
     std::string status = create_contract(*sender, contract_id, pair2, premint_amount, pre_mint_wallet, fee_percentage, new_contract_id);

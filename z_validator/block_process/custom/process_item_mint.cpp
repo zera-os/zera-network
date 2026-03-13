@@ -113,7 +113,7 @@ namespace
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn::ItemizedMintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn::ItemizedMintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     uint64_t nonce = txn->base().nonce();
     ZeraStatus status;
@@ -158,7 +158,7 @@ ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn:
     std::string sender_adr;
     if(sc_txn)
     {
-        sender_adr = txn->base().sc_fee_address();
+        sender_adr = sc_fee_address;
     }
     else
     {

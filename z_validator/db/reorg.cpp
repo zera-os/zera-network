@@ -315,6 +315,7 @@ void Reorg::restore_database(const std::string &block_height, int code)
     db_wallets_temp::remove_all();
     db_gossip::remove_all();
     db_fee_tokens_temp::remove_all();
+    db_sc_subscriber::remove_all();
 
 
     std::vector<std::string> keys;

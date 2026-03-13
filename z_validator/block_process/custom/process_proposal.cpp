@@ -12,7 +12,7 @@
 #include "../compliance/compliance.h"
 #include "../../logging/logging.h"
 #include "fees.h"
-#include "base64.h"
+#include "sc_base64.h"
 
 namespace
 {
@@ -549,14 +549,14 @@ namespace
         return zera_fees::calculate_fees(fee_equiv, multiplier, txn->ByteSize(), txn->base().fee_amount(), fee_amount, contract.coin_denomination().amount(), txn->base().public_key(), contract.contract_id());
     }
 
-    ZeraStatus process_proposal_fees(const zera_txn::GovernanceProposal *txn, zera_txn::InstrumentContract &contract, zera_txn::TXNStatusFees &status_fees, uint256_t &fee_remainder, const std::string &fee_address, const bool &sc_txn)
+    ZeraStatus process_proposal_fees(const zera_txn::GovernanceProposal *txn, zera_txn::InstrumentContract &contract, zera_txn::TXNStatusFees &status_fees, uint256_t &fee_remainder, const std::string &fee_address, const bool &sc_txn, const std::string &sc_fee_address)
     {
 
         // CHANGELOG: added sc_fee address for sc_txns
         std::string wallet_adr;
         if (sc_txn)
         {
-            wallet_adr = txn->base().sc_fee_address();
+            wallet_adr = sc_fee_address;
         }
         else
         {
@@ -686,7 +686,7 @@ namespace
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::GovernanceProposal>(const zera_txn::GovernanceProposal *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::GovernanceProposal>(const zera_txn::GovernanceProposal *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     uint64_t nonce = txn->base().nonce();
     ZeraStatus status;
@@ -706,7 +706,7 @@ ZeraStatus block_process::process_txn<zera_txn::GovernanceProposal>(const zera_t
     }
     zera_txn::InstrumentContract contract;
     uint256_t fee_remainder;
-    status = process_proposal_fees(txn, contract, status_fees, fee_remainder, fee_address, sc_txn);
+    status = process_proposal_fees(txn, contract, status_fees, fee_remainder, fee_address, sc_txn, sc_fee_address);
 
     if (!status.ok())
     {

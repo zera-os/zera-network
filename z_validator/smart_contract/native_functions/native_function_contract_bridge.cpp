@@ -106,7 +106,7 @@ namespace
         block_txns.ParseFromString(value);
 
         std::string fee_address = sender.fee_address;
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, false, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
         if (status.ok())
         {
             sender.txn_hashes.push_back(txn.base().hash());
@@ -124,10 +124,11 @@ namespace
         // add premint wallet
         zera_txn::BaseTXN *base = txn.mutable_base();
 
+        std::string wrapped_name = "Wrapped " + name;
         set_base(base, sender);
         txn.set_contract_version(1);
         txn.set_symbol(symbol);
-        txn.set_name(name);
+        txn.set_name(wrapped_name);
         txn.mutable_coin_denomination()->set_amount(denomination);
         txn.mutable_coin_denomination()->set_denomination_name("unit");
         txn.set_contract_id(contract_id);
@@ -214,16 +215,6 @@ WasmEdge_Result InstrumentContractBridge(void *Data, const WasmEdge_CallingFrame
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[18]);
 
-    std::vector<unsigned char> SymbolKey(SymbolSize);
-    std::vector<unsigned char> NameKey(NameSize);
-    std::vector<unsigned char> DenominationKey(DenominationSize);
-    std::vector<unsigned char> ContractIdKey(ContractIdSize);
-    std::vector<unsigned char> MintIDKey(MintIDSize);
-    std::vector<unsigned char> URIKey(URISize);
-    std::vector<unsigned char> AuthorizedkeyKey(AuthorizedkeySize);
-    std::vector<unsigned char> PreMintKey(PreMintSize);
-    std::vector<unsigned char> PremintAmountKey(PremintAmountSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     std::string symbol;
@@ -231,127 +222,64 @@ WasmEdge_Result InstrumentContractBridge(void *Data, const WasmEdge_CallingFrame
     std::string denomination;
     std::string contract_id;
 
-    logging::print("[InstrumentContractBridge] Res");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, SymbolKey.data(), SymbolPointer, SymbolSize);
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, SymbolPointer, SymbolSize, symbol))
     {
-        std::string symbol_temp(reinterpret_cast<char *>(SymbolKey.data()), SymbolSize);
-        symbol = symbol_temp;
-        logging::print("[InstrumentContractBridge] Symbol:", symbol, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    logging::print("[InstrumentContractBridge] Symbol:", symbol, true);
 
-    logging::print("[InstrumentContractBridge] Res2");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, NameKey.data(), NamePointer, NameSize);
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, NamePointer, NameSize, name))
     {
-        std::string name_temp(reinterpret_cast<char *>(NameKey.data()), NameSize);
-        name = name_temp;
-        logging::print("[InstrumentContractBridge] Name:", name, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[InstrumentContractBridge] Name:", name, true);
 
-    logging::print("[InstrumentContractBridge] Res3");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DenominationKey.data(), DenominationPointer, DenominationSize);
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, DenominationPointer, DenominationSize, denomination))
     {
-        std::string denomination_temp(reinterpret_cast<char *>(DenominationKey.data()), DenominationSize);
-        denomination = denomination_temp;
-        logging::print("[InstrumentContractBridge] Denomination:", denomination, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res4;
-    }
+    logging::print("[InstrumentContractBridge] Denomination:", denomination, true);
 
-    logging::print("[InstrumentContractBridge] Res4");
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, ContractIdKey.data(), ContractIdPointer, ContractIdSize);
-    if (WasmEdge_ResultOK(Res5))
+    if (!read_wasm_param(MemCxt, ContractIdPointer, ContractIdSize, contract_id))
     {
-        std::string contract_id_temp(reinterpret_cast<char *>(ContractIdKey.data()), ContractIdSize);
-        contract_id = contract_id_temp;
-        logging::print("[InstrumentContractBridge] Contract ID:", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res5;
-    }
+    logging::print("[InstrumentContractBridge] Contract ID:", contract_id, true);
 
-    logging::print("[InstrumentContractBridge] Res5");
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, MintIDKey.data(), MintIDPointer, MintIDSize);
     std::string mint_id;
-    if (WasmEdge_ResultOK(Res6))
+    if (!read_wasm_param(MemCxt, MintIDPointer, MintIDSize, mint_id))
     {
-        std::string mint_id_temp(reinterpret_cast<char *>(MintIDKey.data()), MintIDSize);
-        mint_id = mint_id_temp;
-        logging::print("[InstrumentContractBridge] Mint ID:", mint_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res6;
-    }
+    logging::print("[InstrumentContractBridge] Mint ID:", mint_id, true);
 
-    logging::print("[InstrumentContractBridge] Res6");
-    WasmEdge_Result Res7 = WasmEdge_MemoryInstanceGetData(MemCxt, URIKey.data(), URIPointer, URISize);
     std::string uri;
-    if (WasmEdge_ResultOK(Res7))
+    if (!read_wasm_param(MemCxt, URIPointer, URISize, uri))
     {
-        std::string uri_temp(reinterpret_cast<char *>(URIKey.data()), URISize);
-        uri = uri_temp;
-        logging::print("[InstrumentContractBridge] URI:", uri, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res7;
-    }
+    logging::print("[InstrumentContractBridge] URI:", uri, true);
 
-    logging::print("[InstrumentContractBridge] Res7");
-    WasmEdge_Result Res8 = WasmEdge_MemoryInstanceGetData(MemCxt, AuthorizedkeyKey.data(), AuthorizedkeyPointer, AuthorizedkeySize);
     std::string authorized_key;
-    if (WasmEdge_ResultOK(Res8))
+    if (!read_wasm_param(MemCxt, AuthorizedkeyPointer, AuthorizedkeySize, authorized_key))
     {
-        std::string authorized_key_temp(reinterpret_cast<char *>(AuthorizedkeyKey.data()), AuthorizedkeySize);
-        authorized_key = authorized_key_temp;
-        logging::print("[InstrumentContractBridge] Authorized Key:", authorized_key, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res8;
-    }
+    logging::print("[InstrumentContractBridge] Authorized Key:", authorized_key, true);
 
-    logging::print("[InstrumentContractBridge] Res8");
-    WasmEdge_Result Res9 = WasmEdge_MemoryInstanceGetData(MemCxt, PreMintKey.data(), PreMintPointer, PreMintSize);
     std::string pre_mint_wallet;
-    if (WasmEdge_ResultOK(Res9))
+    if (!read_wasm_param(MemCxt, PreMintPointer, PreMintSize, pre_mint_wallet))
     {
-        std::string pre_mint_temp(reinterpret_cast<char *>(PreMintKey.data()), PreMintSize);
-        pre_mint_wallet = pre_mint_temp;
-        logging::print("[InstrumentContractBridge] Pre Mint Wallet:", pre_mint_wallet, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res9;
-    }
+    logging::print("[InstrumentContractBridge] Pre Mint Wallet:", pre_mint_wallet, true);
 
-    logging::print("[InstrumentContractBridge] Res9");
-    WasmEdge_Result Res10 = WasmEdge_MemoryInstanceGetData(MemCxt, PremintAmountKey.data(), PremintAmountPointer, PremintAmountSize);
     std::string premint_amount;
-    if (WasmEdge_ResultOK(Res10))
+    if (!read_wasm_param(MemCxt, PremintAmountPointer, PremintAmountSize, premint_amount))
     {
-        std::string premint_amount_temp(reinterpret_cast<char *>(PremintAmountKey.data()), PremintAmountSize);
-        premint_amount = premint_amount_temp;
-        logging::print("[InstrumentContractBridge] Premint Amount:", premint_amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res10;
-    }
+    logging::print("[InstrumentContractBridge] Premint Amount:", premint_amount, true);
 
     std::string status = create_instrument_contract_bridge(*sender, symbol, name, denomination, contract_id, mint_id, uri, authorized_key, pre_mint_wallet, premint_amount);
 

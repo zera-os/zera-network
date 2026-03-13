@@ -13,7 +13,7 @@
 #include <string>
 #include <vector>
 #include <sstream>
-#include "base64.h"
+#include "sc_base64.h"
 
 // testing
 #include "utils.h"
@@ -31,6 +31,11 @@ namespace
         while (std::getline(tokenStream, token, delimiter))
         {
             result.push_back(token);
+        }
+
+        if (!str.empty() && str.back() == delimiter)
+        {
+            result.push_back("");
         }
 
         return result;
@@ -435,7 +440,7 @@ namespace
                 continue;
             }
 
-            if (execute.smart_contract_name() == "zera_dex_proxy" && execute.instance() == 1 && execute.function() == "execute")
+            if (execute.smart_contract_name() == "zera_dex_proxy_v1" && execute.instance() == 1 && execute.function() == "execute")
             {
 
                 if (execute.parameters().size() != 2)
@@ -456,23 +461,12 @@ namespace
                     continue;
                 }
 
-
                 std::vector<std::string> parameters_vec = split_string(parameter2.value(), ',');
 
                 if (parameter.value() == "remove_liquidity")
                 {
 
-                    if (parameters_vec.size() != 4)
-                    {
-                        continue;
-                    }
-
-                    if (parameters_vec.at(3) != "25")
-                    {
-                        continue;
-                    }
-
-                    if (parameters_vec.at(0) != NETWORK_CONTRACT && parameters_vec.at(1) != NETWORK_CONTRACT)
+                    if (parameters_vec.size() != 4 || parameters_vec.at(3) != "25" || (parameters_vec.at(0) != NETWORK_CONTRACT && parameters_vec.at(1) != NETWORK_CONTRACT))
                     {
                         continue;
                     }
@@ -503,21 +497,21 @@ namespace
                         continue;
                     }
 
-                    if(parameter.value() == "swap" && parameters_vec.at(3) != "25")
+                    if (parameter.value() == "swap" && parameters_vec.at(3) != "25")
                     {
                         logging::print("parameters_vec.at(3) != 25", true);
                         continue;
                     }
 
-                    if(parameter.value() == "create_liquidity_pool" && parameters_vec.at(4) != "25" )
+                    if (parameter.value() == "create_liquidity_pool" && parameters_vec.at(4) != "25")
                     {
                         logging::print("parameters_vec.at(4) != 25", true);
                         continue;
                     }
 
-                    if (parameters_vec.at(0) != "$ZRA+0000" && parameters_vec.at(1) != "$ZRA+0000")
+                    if (parameters_vec.at(0) != NETWORK_CONTRACT && parameters_vec.at(1) != NETWORK_CONTRACT)
                     {
-                        logging::print("parameters_vec.at(0) != $ZRA+0000 && parameters_vec.at(1) != $ZRA+0000", true);
+                        logging::print("parameters_vec.at(0) != $ZRA+0000 || parameters_vec.at(1) != $ZRA+0000", true);
                         continue;
                     }
 
@@ -542,6 +536,53 @@ namespace
             }
         }
 
+        for (auto txn_fees : txns.txn_fees_and_status())
+        {
+            for (auto nested_result : txn_fees.nested_results())
+            {
+                if (nested_result.smart_contract_name() == "zera_dex_proxy_v1" && nested_result.smart_contract_instance() == 1 && nested_result.function() == "execute")
+                {
+                    std::vector<std::string> results(nested_result.emits().begin(), nested_result.emits().end());
+                    if (results.size() > 0 && (results.at(0) == "SWAP_EXECUTED" ||
+                                               results.at(0) == "LIQUIDITY_POOL_CREATED" ||
+                                               results.at(0) == "LIQUIDITY_REMOVED"))
+                    {
+
+                        if (results.size() >= 4)
+                        {
+                            std::string fee_bps = results.at(3).substr(results.at(3).find(' ') + 1);
+                            std::string token1 = results.at(1).substr(results.at(1).find(' ') + 1);
+                            std::string token2 = results.at(2).substr(results.at(2).find(' ') + 1);
+
+                            if (fee_bps != "25" || (token1 != NETWORK_CONTRACT && token2 != NETWORK_CONTRACT))
+                            {
+                                logging::print("fee_bps: " + fee_bps, true);
+                                logging::print("token1: " + token1, true);
+                                logging::print("token2: " + token2, true);
+                                logging::print("nested_result results do not match", true);
+                                continue;
+                            }
+
+                            if (token1 == NETWORK_CONTRACT)
+                            {
+                                if (tokens_to_update.find(token2) == tokens_to_update.end())
+                                {
+                                    tokens_to_update.insert(token2);
+                                }
+                            }
+                            else
+                            {
+                                if (tokens_to_update.find(token1) == tokens_to_update.end())
+                                {
+                                    tokens_to_update.insert(token1);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         std::string update_key = "LAST_UPDATED";
         std::string value;
         uint64_t last_updated;
@@ -555,7 +596,7 @@ namespace
         }
 
         std::string stable_coin_contract;
-        if(!db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) || stable_coin_contract == "" || !db_contracts::exist(stable_coin_contract))
+        if (!db_smart_contract_states::get_single(STABLE_COIN_SC, stable_coin_contract) || stable_coin_contract == "" || !db_contracts::exist(stable_coin_contract))
         {
             stable_coin_contract = STABLE_COIN_CONTRACT;
         }
@@ -566,7 +607,6 @@ namespace
             std::string fee_data;
             db_fee_tokens::get_single(FEE_TOKENS + NETWORK_CONTRACT, fee_data);
             zra_fee_token.ParseFromString(fee_data);
-
 
             std::string zra_stable_coin_key = ACE_PROXY + NETWORK_CONTRACT + stable_coin_contract;
             std::string rate_data;
@@ -587,7 +627,7 @@ namespace
                 zra_fee_token.set_rate(zra_rate.str());
                 zra_fee_token.set_authorized(true);
                 zra_fee_token.set_whitelisted(true);
-                
+
                 db_fee_tokens::store_single(FEE_TOKENS + NETWORK_CONTRACT, zra_fee_token.SerializeAsString());
             }
 
@@ -615,10 +655,8 @@ namespace
                 uint256_t zera_volume = boost::lexical_cast<uint256_t>(lp_token.token1_volume);
                 uint256_t lp_token_volume = boost::lexical_cast<uint256_t>(lp_token.circulating_lp_tokens);
 
-
                 // Calculate what % of LP tokens are burned and apply to ZRA volume
                 uint256_t zera_locked_by_burned_lp = (lp_token_burn_balance_uint * zera_volume) / lp_token_volume;
-
 
                 // Convert locked ZRA to stable coin value
                 uint256_t stable_value = (zera_locked_by_burned_lp * zra_rate) / uint256_t("1000000000");
@@ -648,7 +686,7 @@ namespace
                 if (db_smart_contract_states::get_single(token_ratio_key, token_ratio_data) && token_ratio_data != "")
                 {
                     zera_txn::InstrumentContract contract;
-                    if(!block_process::get_contract(token, contract).ok())
+                    if (!block_process::get_contract(token, contract).ok())
                     {
                         continue;
                     }
@@ -657,7 +695,7 @@ namespace
                     {
                         uint256_t token_ratio = boost::lexical_cast<uint256_t>(token_ratio_data);
                         uint256_t rate = (token_ratio * zra_rate) / ONE_DOLLAR;
-                        uint256_t max_stake = (stable_value *  denomination) / rate;
+                        uint256_t max_stake = (stable_value * denomination) / rate;
 
                         fee_token.set_authorized(authorized);
                         fee_token.set_max_stake(max_stake.str());
@@ -665,10 +703,10 @@ namespace
                         fee_token.set_stable_value_allowed(stable_value.str());
                         fee_token.set_whitelisted(false);
                         std::string token_whitelist_data;
-                        if(db_smart_contract_states::get_single(TOKEN_WHITELIST, token_whitelist_data) && token_whitelist_data != "")
+                        if (db_smart_contract_states::get_single(TOKEN_WHITELIST, token_whitelist_data) && token_whitelist_data != "")
                         {
                             NetworkValues network_values = decode_network_values(token_whitelist_data);
-                            if(std::find(network_values.values.begin(), network_values.values.end(), token) != network_values.values.end())
+                            if (std::find(network_values.values.begin(), network_values.values.end(), token) != network_values.values.end())
                             {
                                 fee_token.set_whitelisted(true);
                             }
@@ -757,7 +795,6 @@ ZeraStatus block_process::store_txns(zera_validator::Block *block, bool archive,
         validator_utils::archive_balances(block_height);
     }
 
-    
     if (backup)
     {
         Reorg::backup_blockchain(block_height);

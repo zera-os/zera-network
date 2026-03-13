@@ -185,29 +185,9 @@ private:
     static void ProcessRequest(const TXType *request, std::string client_ip)
     {
 
-        ZeraStatus status = verify_txns::verify_txn(request);
-        std::string memo = "";
-
-        if (request->base().has_memo())
-        {
-            memo = request->base().memo();
-        }
-
-        if (!status.ok())
-        {
-            status.prepend_message("validator_network_service_grpc.h: ProcessRequestAsync: " + memo);
-
-            if (status.code() != ZeraStatus::Code::DUPLICATE_TXN_ERROR)
-            {
-                rate_limiter.processUpdate(client_ip, true);
-                logging::print(status.read_status());
-            }
-
-            return;
-        }
 
         zera_txn::TRANSACTION_TYPE txn_type;
-        status = verify_txns::store_txn(request, txn_type);
+        ZeraStatus status = verify_txns::store_txn(request, txn_type);
 
         // if (txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_REGISTRATION_TYPE && txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_HEARTBEAT_TYPE)
         // {
@@ -223,14 +203,6 @@ private:
         //     }
         // }
 
-        // if txn was stored start gossip
-        if (!status.ok())
-        {
-            rate_limiter.processUpdate(client_ip, true);
-            status.prepend_message("validator_network_service_grpc.h: ProcessRequestAsync: " + memo);
-            logging::print(status.read_status());
-            return;
-        }
 
         TXType *txn = new TXType();
         txn->CopyFrom(*request);

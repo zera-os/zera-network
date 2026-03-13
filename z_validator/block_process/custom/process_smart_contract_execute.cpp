@@ -10,9 +10,11 @@
 #include "fees.h"
 #include "zera_api.pb.h"
 #include "validator_api_client.h"
+#include <algorithm>
+#include <limits>
 #include "hex_conversion.h"
 #include <map>
-
+#include "block_emit_type.h"
 namespace
 {
     void storage_fees(const zera_txn::SmartContractExecuteTXN *txn, const uint256_t &fees, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
@@ -65,13 +67,13 @@ namespace
         logging::print("fee_taken:", fee_taken.str());
         logging::print("gas_approved:", gas.str());
 
-        gas_approved = static_cast<uint64_t>(gas);
+        gas_approved = gas > std::numeric_limits<uint64_t>::max() ? std::numeric_limits<uint64_t>::max() : static_cast<uint64_t>(gas);
 
         auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
 
         return balance_tracker::subtract_txn_balance(wallet_adr, contract_id, fee_left, txn->base().hash());
     }
-    ZeraStatus check_execute(const zera_txn::SmartContractExecuteTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const uint64_t &gas_approved, uint64_t &used_gas, std::vector<std::string> &txn_hashes, zera_api::SmartContractEventsResponse &event)
+    ZeraStatus check_execute(const zera_txn::SmartContractExecuteTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const uint64_t &gas_approved, uint64_t &used_gas, std::vector<std::string> &txn_hashes, std::vector<zera_api::SmartContractEventsResponse> &events)
     {
 
         ZeraStatus status1 = zera_fees::process_interface_fees(txn->base(), status_fees);
@@ -155,9 +157,11 @@ namespace
         smart_contract_pub_key.set_smart_contract_auth("sc_" + instance_name);
         std::string smart_contract_wallet = wallets::generate_wallet(smart_contract_pub_key);
         std::map<std::string, std::string> derived_wallets;
+        std::map<std::string, BlockEmitType> block_emits;
+        bool panic = false;
 
         try
-        {   
+        {
             std::vector<std::any> results = smart_contract_service::eval(sender_pub_key, sender_wallet_adr,
                                                                          instance_name, db_contract.binary_code(),
                                                                          db_contract.language(), txn->function(),
@@ -165,11 +169,9 @@ namespace
                                                                          txn->base().hash(), timestamp,
                                                                          block_txns_key, fee_address,
                                                                          smart_contract_wallet, gas_approved,
-                                                                         used_gas, txn_hashes, derived_wallets, db_contract.sc_fees(), txn->base().fee_id());
-
+                                                                         used_gas, txn_hashes, derived_wallets, txn->base().fee_id(), block_emits, panic);
 
             // store result
-            std::string event_data = "";
             std::vector<std::string> vector_results;
             for (int i = results.size() - 1; i >= 0; --i)
             {
@@ -177,15 +179,63 @@ namespace
                 logging::print("result", std::to_string(i), ":", val);
                 status_fees.add_smart_contract_result(val);
 
-                event_data += "[res]" + val + "[end]";
                 vector_results.push_back(val);
             }
+            std::string txn_hash = hex_conversion::bytes_to_hex(txn->base().hash());
 
-            if (event_data.size() > 0)
+            std::vector<BlockEmitType> sorted_emits;
+            sorted_emits.reserve(block_emits.size());
+            for (const auto &[key, entry] : block_emits)
+            {
+                sorted_emits.push_back(entry);
+            }
+            std::sort(sorted_emits.begin(), sorted_emits.end(),
+                      [](const BlockEmitType &a, const BlockEmitType &b) { return a.depth < b.depth; });
+
+            for (const auto &value : sorted_emits)
+            {
+                logging::print(value.smart_contract_name + "_" + value.smart_contract_instance + " ", value.function, true);
+                zera_txn::NestedResult *nested_result = status_fees.add_nested_results();
+                std::string sc_data;
+                std::string sc_key = value.smart_contract_name + "_" + value.smart_contract_instance;
+                // sc_key
+                db_event_management::get_single(EVENT_MANAGEMENT_TEMP, sc_data);
+                zera_api::SmartContractEventManagementTemp event_management_temp;
+                event_management_temp.ParseFromString(sc_data);
+                event_management_temp.add_event_keys(txn_hash);
+                event_management_temp.add_smart_contract_ids(sc_key);
+                db_event_management::store_single(EVENT_MANAGEMENT_TEMP, event_management_temp.SerializeAsString());
+
+                zera_api::SmartContractEventsResponse event_management;
+                event_management.set_smart_contract(value.smart_contract_name);
+                event_management.set_instance(std::stoull(value.smart_contract_instance));
+                event_management.set_gas_used(used_gas);
+                event_management.set_gas_approved(gas_approved);
+                event_management.set_function(value.function);
+                event_management.mutable_caller()->CopyFrom(txn->base().public_key());
+                event_management.set_txn_hash(txn_hash);
+
+                nested_result->set_smart_contract_name(value.smart_contract_name);
+                nested_result->set_smart_contract_instance(std::stoull(value.smart_contract_instance));
+                nested_result->set_function(value.function);
+                for (const auto &emit : value.emits)
+                {
+                    logging::print("nested result: ", emit, true);
+                    event_management.add_event_data(emit);
+                    nested_result->add_emits(emit);
+                }
+                db_event_management::store_single(txn_hash, event_management.SerializeAsString());
+
+                if (db_sc_subscriber::exist(sc_key))
+                {
+                    events.push_back(event_management);
+                }
+            }
+
+            if (vector_results.size() > 0)
             {
 
                 std::string sc_data;
-                std::string txn_hash = hex_conversion::bytes_to_hex(txn->base().hash());
 
                 db_event_management::get_single(EVENT_MANAGEMENT_TEMP, sc_data);
                 zera_api::SmartContractEventManagementTemp event_management_temp;
@@ -195,35 +245,22 @@ namespace
                 db_event_management::store_single(EVENT_MANAGEMENT_TEMP, event_management_temp.SerializeAsString());
 
                 zera_api::SmartContractEventsResponse event_management;
-                event_management.set_smart_contract(instance_name);
+                event_management.set_smart_contract(txn->smart_contract_name());
                 event_management.set_instance(txn->instance());
                 event_management.set_gas_used(used_gas);
                 event_management.set_gas_approved(gas_approved);
                 event_management.set_function(txn->function());
                 event_management.mutable_caller()->CopyFrom(txn->base().public_key());
-                event_management.set_function(txn->function());
                 event_management.set_txn_hash(txn_hash);
                 for (const auto &result : vector_results)
                 {
                     event_management.add_event_data(result);
                 }
                 db_event_management::store_single(txn_hash, event_management.SerializeAsString());
-            }
 
-            if (db_sc_subscriber::exist(instance_name))
-            {
-                event.set_smart_contract(txn->smart_contract_name());
-                event.set_instance(txn->instance());
-                event.set_gas_used(used_gas);
-                event.set_gas_approved(gas_approved);
-                event.set_function(txn->function());
-                event.mutable_caller()->CopyFrom(txn->base().public_key());
-                event.set_function(txn->function());
-                std::string txn_hash = hex_conversion::bytes_to_hex(txn->base().hash());
-                event.set_txn_hash(txn_hash);
-                for (const auto &result : vector_results)
+                if (db_sc_subscriber::exist(instance_name))
                 {
-                    event.add_event_data(result);
+                    events.push_back(event_management);
                 }
             }
 
@@ -287,12 +324,22 @@ namespace
             txn_hash_tracker::add_sc_to_hash();
             nonce_tracker::add_sc_to_used_nonce();
             db_sc_temp::remove_all();
-            return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "Failed to execute txn", zera_txn::TXN_STATUS::INVALID_TXN_DATA);
+
+            if(used_gas >= gas_approved)
+            {
+                return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "Failed: used gas is greater than gas approved", zera_txn::TXN_STATUS::OUT_OF_GAS);
+            }
+            else if(panic)
+            {
+                return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "Failed: panic", zera_txn::TXN_STATUS::SMART_CONTRACT_PANIC);
+            }
+
+            return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "Failed to execute txn", zera_txn::TXN_STATUS::SMART_CONTRACT_CRASH);
         }
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const zera_txn::SmartContractExecuteTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const zera_txn::SmartContractExecuteTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     logging::print("[ProcessSmartContractExecute] executing smart contract...", txn->smart_contract_name());
     logging::print("instance:", txn->smart_contract_name());
@@ -329,7 +376,7 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const z
 
     uint256_t fee_taken = 0;
     // process base fees. If wallet cannot pay fees or anything else is wrong with the fees return failed txn
-    status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_EXECUTE_TYPE, fee_taken, fee_address, sc_txn);
+    status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_EXECUTE_TYPE, fee_taken, fee_address, sc_txn, sc_fee_address);
 
     if (!status.ok())
     {
@@ -352,8 +399,8 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const z
     std::vector<std::string> txn_hashes;
     if (status.ok())
     {
-        zera_api::SmartContractEventsResponse event;
-        status = check_execute(txn, status_fees, fee_address, gas_approved, used_gas, txn_hashes, event);
+        std::vector<zera_api::SmartContractEventsResponse> events;
+        status = check_execute(txn, status_fees, fee_address, gas_approved, used_gas, txn_hashes, events);
         balance_tracker::add_txn_balance(wallet_adr, txn->base().fee_id(), fee_left, txn->base().hash());
         status_fees.set_gas(used_gas);
 
@@ -377,10 +424,13 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractExecuteTXN>(const z
             gas_fees(txn, used_gas, status_fees, fee_address);
         }
 
-        if (event.has_caller())
+        for (auto &event : events)
         {
-            event.set_storage_fee(total_fee.str());
-            ValidatorAPIClient::StageEvent(event);
+            if (event.has_caller())
+            {
+                event.set_storage_fee(total_fee.str());
+                ValidatorAPIClient::StageEvent(event);
+            }
         }
     }
 

@@ -51,7 +51,7 @@ namespace
         zera_txn::TXNS block_txns;
         block_txns.ParseFromString(value);
 
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::ALLOWANCE_TYPE, false, sender.fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::ALLOWANCE_TYPE, false, sender.fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -183,19 +183,7 @@ WasmEdge_Result Allowance(void *Data, const WasmEdge_CallingFrameContext *CallFr
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[16]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> CurrencyKey(CurrencySize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> MonthsKey(MonthsSize);
-    std::vector<unsigned char> SecondsKey(SecondsSize);
-    std::vector<unsigned char> StartKey(StartSize);
-    std::vector<unsigned char> AuthorizeKey(AuthorizeSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-    logging::print("[Allowance] Res");
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
 
     std::string contract_id;
     std::string wallet;
@@ -206,143 +194,93 @@ WasmEdge_Result Allowance(void *Data, const WasmEdge_CallingFrameContext *CallFr
     std::string start;
     bool authorize;
 
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_id_temp;
-        logging::print("[Allowance] Contract ID:", contract_id);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[Allowance] Contract ID:", contract_id);
 
-    logging::print("[Allowance] Res2");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    if (WasmEdge_ResultOK(Res2))
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        auto wallet_vec = base58_decode(wallet_temp);
-        wallet = std::string(wallet_vec.begin(), wallet_vec.end());
-        logging::print("[Allowance] Wallet:", wallet_temp, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    auto wallet_vec = base58_decode(wallet_temp);
+    wallet = std::string(wallet_vec.begin(), wallet_vec.end());
+    logging::print("[Allowance] Wallet:", wallet_temp, true);
 
-    logging::print("[Allowance] Res3");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, CurrencyKey.data(), CurrencyPointer, CurrencySize);
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, CurrencyPointer, CurrencySize, currency))
     {
-        std::string currency_temp(reinterpret_cast<char *>(CurrencyKey.data()), CurrencySize);
-        currency = currency_temp;
-        logging::print("[Allowance] Currency:", currency, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[Allowance] Currency:", currency, true);
 
-    logging::print("[Allowance] Res4");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-        logging::print("[Allowance] Amount:", amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    logging::print("[Allowance] Amount:", amount, true);
+
+    std::string months_temp;
+    if (!read_wasm_param(MemCxt, MonthsPointer, MonthsSize, months_temp))
     {
-        return Res4;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[Allowance] Res5");
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, MonthsKey.data(), MonthsPointer, MonthsSize);
-    if (WasmEdge_ResultOK(Res5))
+    if (months_temp != "N/A" && !isValidUint32(months_temp))
     {
-        std::string months_temp(reinterpret_cast<char *>(MonthsKey.data()), MonthsSize);
-        if (months_temp != "N/A" && !isValidUint32(months_temp))
-        {
-            logging::print("[Allowance] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
+        logging::print("[Allowance] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
 
-            std::string result = "[Allowance] FAILED: Invalid uint32_t for months";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        months = months_temp;
-
-        logging::print("[Allowance] Months:", months, true);
+        std::string result = "[Allowance] FAILED: Invalid uint32_t for months";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
     }
-    else
+    months = months_temp;
+    logging::print("[Allowance] Months:", months, true);
+
+    std::string seconds_temp;
+    if (!read_wasm_param(MemCxt, SecondsPointer, SecondsSize, seconds_temp))
     {
-        return Res5;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[Allowance] Res 6");
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, SecondsKey.data(), SecondsPointer, SecondsSize);
-    if (WasmEdge_ResultOK(Res6))
+    if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
     {
-        std::string seconds_temp(reinterpret_cast<char *>(SecondsKey.data()), SecondsSize);
-        if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
-        {
-            std::string result = "[Allowance] FAILED: Invalid uint32_t for seconds";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
+        std::string result = "[Allowance] FAILED: Invalid uint32_t for seconds";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    seconds = seconds_temp;
+    logging::print("[Allowance] Seconds:", seconds, true);
 
-        // Convert string to uint32_t
-        seconds = seconds_temp;
+    std::string start_temp;
+    if (!read_wasm_param(MemCxt, StartPointer, StartSize, start_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    if (start_temp != "N/A" && !isValidUint32(start_temp))
+    {
+        std::string result = "[Allowance] FAILED: Invalid uint32_t for start time";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    start = start_temp;
+    logging::print("[Allowance] Start Time:", start, true);
 
-        logging::print("[Allowance] Seconds:", seconds, true);
-    }
-    else
+    std::string authorize_temp;
+    if (!read_wasm_param(MemCxt, AuthorizePointer, AuthorizeSize, authorize_temp))
     {
-        return Res6;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[Allowance] Res 7");
-    WasmEdge_Result Res7 = WasmEdge_MemoryInstanceGetData(MemCxt, StartKey.data(), StartPointer, StartSize);
-    if (WasmEdge_ResultOK(Res7))
-    {
-        std::string start_temp(reinterpret_cast<char *>(StartKey.data()), StartSize);
-        if (start_temp != "N/A" && !isValidUint32(start_temp))
-        {
-            std::string result = "[Allowance] FAILED: Invalid uint32_t for start time";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        start = start_temp;
-        logging::print("[Allowance] Start Time:", start, true);
-    }
-    else
-    {
-        return Res7;
-    }
-
-    logging::print("[Allowance] Res8");
-    WasmEdge_Result Res8 = WasmEdge_MemoryInstanceGetData(MemCxt, AuthorizeKey.data(), AuthorizePointer, AuthorizeSize);
-    if (WasmEdge_ResultOK(Res8))
-    {
-        std::string authorize_temp(reinterpret_cast<char *>(AuthorizeKey.data()), AuthorizeSize);
-        authorize = (authorize_temp == "true");
-        logging::print("[Allowance] Authorize:", authorize_temp, true);
-    }
-    else
-    {
-        return Res8;
-    }
+    authorize = (authorize_temp == "true");
+    logging::print("[Allowance] Authorize:", authorize_temp, true);
 
     SenderDataType sender;
     sender = *(SenderDataType *)Data;
@@ -388,19 +326,7 @@ WasmEdge_Result AllowanceSender(void *Data, const WasmEdge_CallingFrameContext *
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[16]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> CurrencyKey(CurrencySize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> MonthsKey(MonthsSize);
-    std::vector<unsigned char> SecondsKey(SecondsSize);
-    std::vector<unsigned char> StartKey(StartSize);
-    std::vector<unsigned char> AuthorizeKey(AuthorizeSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-    logging::print("[AllowanceSender] Res");
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
 
     std::string contract_id;
     std::string wallet;
@@ -411,143 +337,93 @@ WasmEdge_Result AllowanceSender(void *Data, const WasmEdge_CallingFrameContext *
     std::string start;
     bool authorize;
 
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_id_temp;
-        logging::print("[AllowanceSender] Contract ID:", contract_id);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[AllowanceSender] Contract ID:", contract_id);
 
-    logging::print("[AllowanceSender] Res2");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    if (WasmEdge_ResultOK(Res2))
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        auto wallet_vec = base58_decode(wallet_temp);
-        wallet = std::string(wallet_vec.begin(), wallet_vec.end());
-        logging::print("[AllowanceSender] Wallet:", wallet_temp, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    auto wallet_vec = base58_decode(wallet_temp);
+    wallet = std::string(wallet_vec.begin(), wallet_vec.end());
+    logging::print("[AllowanceSender] Wallet:", wallet_temp, true);
 
-    logging::print("[AllowanceSender] Res3");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, CurrencyKey.data(), CurrencyPointer, CurrencySize);
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, CurrencyPointer, CurrencySize, currency))
     {
-        std::string currency_temp(reinterpret_cast<char *>(CurrencyKey.data()), CurrencySize);
-        currency = currency_temp;
-        logging::print("[AllowanceSender] Currency:", currency, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[AllowanceSender] Currency:", currency, true);
 
-    logging::print("[AllowanceSender] Res4");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-        logging::print("[AllowanceSender] Amount:", amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    logging::print("[AllowanceSender] Amount:", amount, true);
+
+    std::string months_temp;
+    if (!read_wasm_param(MemCxt, MonthsPointer, MonthsSize, months_temp))
     {
-        return Res4;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceSender] Res5");
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, MonthsKey.data(), MonthsPointer, MonthsSize);
-    if (WasmEdge_ResultOK(Res5))
+    if (months_temp != "N/A" && !isValidUint32(months_temp))
     {
-        std::string months_temp(reinterpret_cast<char *>(MonthsKey.data()), MonthsSize);
-        if (months_temp != "N/A" && !isValidUint32(months_temp))
-        {
-            logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
+        logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
 
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        months = months_temp;
-
-        logging::print("[AllowanceSender] Months:", months, true);
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
     }
-    else
+    months = months_temp;
+    logging::print("[AllowanceSender] Months:", months, true);
+
+    std::string seconds_temp;
+    if (!read_wasm_param(MemCxt, SecondsPointer, SecondsSize, seconds_temp))
     {
-        return Res5;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceSender] Res 6");
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, SecondsKey.data(), SecondsPointer, SecondsSize);
-    if (WasmEdge_ResultOK(Res6))
+    if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
     {
-        std::string seconds_temp(reinterpret_cast<char *>(SecondsKey.data()), SecondsSize);
-        if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
-        {
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for seconds";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for seconds";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    seconds = seconds_temp;
+    logging::print("[AllowanceSender] Seconds:", seconds, true);
 
-        // Convert string to uint32_t
-        seconds = seconds_temp;
+    std::string start_temp;
+    if (!read_wasm_param(MemCxt, StartPointer, StartSize, start_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    if (start_temp != "N/A" && !isValidUint32(start_temp))
+    {
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for start time";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    start = start_temp;
+    logging::print("[AllowanceSender] Start Time:", start, true);
 
-        logging::print("[AllowanceSender] Seconds:", seconds, true);
-    }
-    else
+    std::string authorize_temp;
+    if (!read_wasm_param(MemCxt, AuthorizePointer, AuthorizeSize, authorize_temp))
     {
-        return Res6;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceSender] Res 7");
-    WasmEdge_Result Res7 = WasmEdge_MemoryInstanceGetData(MemCxt, StartKey.data(), StartPointer, StartSize);
-    if (WasmEdge_ResultOK(Res7))
-    {
-        std::string start_temp(reinterpret_cast<char *>(StartKey.data()), StartSize);
-        if (start_temp != "N/A" && !isValidUint32(start_temp))
-        {
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for start time";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        start = start_temp;
-        logging::print("[AllowanceSender] Start Time:", start, true);
-    }
-    else
-    {
-        return Res7;
-    }
-
-    logging::print("[AllowanceSender] Res8");
-    WasmEdge_Result Res8 = WasmEdge_MemoryInstanceGetData(MemCxt, AuthorizeKey.data(), AuthorizePointer, AuthorizeSize);
-    if (WasmEdge_ResultOK(Res8))
-    {
-        std::string authorize_temp(reinterpret_cast<char *>(AuthorizeKey.data()), AuthorizeSize);
-        authorize = (authorize_temp == "true");
-        logging::print("[AllowanceSender] Authorize:", authorize_temp, true);
-    }
-    else
-    {
-        return Res8;
-    }
+    authorize = (authorize_temp == "true");
+    logging::print("[AllowanceSender] Authorize:", authorize_temp, true);
 
     SenderDataType sender;
     sender = *(SenderDataType *)Data;
@@ -592,19 +468,7 @@ WasmEdge_Result AllowanceCurrent(void *Data, const WasmEdge_CallingFrameContext 
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[16]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> CurrencyKey(CurrencySize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> MonthsKey(MonthsSize);
-    std::vector<unsigned char> SecondsKey(SecondsSize);
-    std::vector<unsigned char> StartKey(StartSize);
-    std::vector<unsigned char> AuthorizeKey(AuthorizeSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-    logging::print("[AllowanceCurrent] Res");
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
 
     std::string contract_id;
     std::string wallet;
@@ -615,143 +479,93 @@ WasmEdge_Result AllowanceCurrent(void *Data, const WasmEdge_CallingFrameContext 
     std::string start;
     bool authorize;
 
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_id_temp;
-        logging::print("[AllowanceCurrent] Contract ID:", contract_id);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[AllowanceCurrent] Contract ID:", contract_id);
 
-    logging::print("[AllowanceCurrent] Res2");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    if (WasmEdge_ResultOK(Res2))
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        auto wallet_vec = base58_decode(wallet_temp);
-        wallet = std::string(wallet_vec.begin(), wallet_vec.end());
-        logging::print("[AllowanceCurrent] Wallet:", wallet_temp, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    auto wallet_vec = base58_decode(wallet_temp);
+    wallet = std::string(wallet_vec.begin(), wallet_vec.end());
+    logging::print("[AllowanceCurrent] Wallet:", wallet_temp, true);
 
-    logging::print("[AllowanceCurrent] Res3");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, CurrencyKey.data(), CurrencyPointer, CurrencySize);
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, CurrencyPointer, CurrencySize, currency))
     {
-        std::string currency_temp(reinterpret_cast<char *>(CurrencyKey.data()), CurrencySize);
-        currency = currency_temp;
-        logging::print("[AllowanceCurrent] Currency:", currency, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[AllowanceCurrent] Currency:", currency, true);
 
-    logging::print("[AllowanceCurrent] Res4");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-        logging::print("[AllowanceSender] Amount:", amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    logging::print("[AllowanceSender] Amount:", amount, true);
+
+    std::string months_temp;
+    if (!read_wasm_param(MemCxt, MonthsPointer, MonthsSize, months_temp))
     {
-        return Res4;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceCurrent] Res5");
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, MonthsKey.data(), MonthsPointer, MonthsSize);
-    if (WasmEdge_ResultOK(Res5))
+    if (months_temp != "N/A" && !isValidUint32(months_temp))
     {
-        std::string months_temp(reinterpret_cast<char *>(MonthsKey.data()), MonthsSize);
-        if (months_temp != "N/A" && !isValidUint32(months_temp))
-        {
-            logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
+        logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
 
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        months = months_temp;
-
-        logging::print("[AllowanceCurrent] Months:", months, true);
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
     }
-    else
+    months = months_temp;
+    logging::print("[AllowanceCurrent] Months:", months, true);
+
+    std::string seconds_temp;
+    if (!read_wasm_param(MemCxt, SecondsPointer, SecondsSize, seconds_temp))
     {
-        return Res5;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceCurrent] Res 6");
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, SecondsKey.data(), SecondsPointer, SecondsSize);
-    if (WasmEdge_ResultOK(Res6))
+    if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
     {
-        std::string seconds_temp(reinterpret_cast<char *>(SecondsKey.data()), SecondsSize);
-        if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
-        {
-            std::string result = "[AllowanceCurrent] FAILED: Invalid uint32_t for seconds";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
+        std::string result = "[AllowanceCurrent] FAILED: Invalid uint32_t for seconds";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    seconds = seconds_temp;
+    logging::print("[AllowanceCurrent] Seconds:", seconds, true);
 
-        // Convert string to uint32_t
-        seconds = seconds_temp;
+    std::string start_temp;
+    if (!read_wasm_param(MemCxt, StartPointer, StartSize, start_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    if (start_temp != "N/A" && !isValidUint32(start_temp))
+    {
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for start time";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    start = start_temp;
+    logging::print("[AllowanceCurrent] Start Time:", start, true);
 
-        logging::print("[AllowanceCurrent] Seconds:", seconds, true);
-    }
-    else
+    std::string authorize_temp;
+    if (!read_wasm_param(MemCxt, AuthorizePointer, AuthorizeSize, authorize_temp))
     {
-        return Res6;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceCurrent] Res 7");
-    WasmEdge_Result Res7 = WasmEdge_MemoryInstanceGetData(MemCxt, StartKey.data(), StartPointer, StartSize);
-    if (WasmEdge_ResultOK(Res7))
-    {
-        std::string start_temp(reinterpret_cast<char *>(StartKey.data()), StartSize);
-        if (start_temp != "N/A" && !isValidUint32(start_temp))
-        {
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for start time";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        start = start_temp;
-        logging::print("[AllowanceCurrent] Start Time:", start, true);
-    }
-    else
-    {
-        return Res7;
-    }
-
-    logging::print("[AllowanceCurrent] Res8");
-    WasmEdge_Result Res8 = WasmEdge_MemoryInstanceGetData(MemCxt, AuthorizeKey.data(), AuthorizePointer, AuthorizeSize);
-    if (WasmEdge_ResultOK(Res8))
-    {
-        std::string authorize_temp(reinterpret_cast<char *>(AuthorizeKey.data()), AuthorizeSize);
-        authorize = (authorize_temp == "true");
-        logging::print("[AllowanceSender] Authorize:", authorize_temp, true);
-    }
-    else
-    {
-        return Res8;
-    }
+    authorize = (authorize_temp == "true");
+    logging::print("[AllowanceSender] Authorize:", authorize_temp, true);
 
     SenderDataType* sender = (SenderDataType *)Data;
 
@@ -799,20 +613,7 @@ WasmEdge_Result AllowanceDelegate(void *Data, const WasmEdge_CallingFrameContext
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[18]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> CurrencyKey(CurrencySize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> MonthsKey(MonthsSize);
-    std::vector<unsigned char> SecondsKey(SecondsSize);
-    std::vector<unsigned char> StartKey(StartSize);
-    std::vector<unsigned char> AuthorizeKey(AuthorizeSize);
-    std::vector<unsigned char> DelegateKey(DelegateSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-
-    logging::print("[AllowanceDelegate] Res");
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
 
     std::string contract_id;
     std::string wallet;
@@ -824,157 +625,102 @@ WasmEdge_Result AllowanceDelegate(void *Data, const WasmEdge_CallingFrameContext
     std::string delegate_wallet;
     bool authorize;
 
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_id_temp;
-        logging::print("[AllowanceDelegate] Contract ID:", contract_id);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[AllowanceDelegate] Contract ID:", contract_id);
 
-    logging::print("[AllowanceDelegate] Res2");
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    if (WasmEdge_ResultOK(Res2))
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        auto wallet_vec = base58_decode(wallet_temp);
-        wallet = std::string(wallet_vec.begin(), wallet_vec.end());
-        logging::print("[AllowanceDelegate] Wallet:", wallet_temp, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    auto wallet_vec = base58_decode(wallet_temp);
+    wallet = std::string(wallet_vec.begin(), wallet_vec.end());
+    logging::print("[AllowanceDelegate] Wallet:", wallet_temp, true);
 
-    logging::print("[AllowanceDelegate] Res3");
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, CurrencyKey.data(), CurrencyPointer, CurrencySize);
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, CurrencyPointer, CurrencySize, currency))
     {
-        std::string currency_temp(reinterpret_cast<char *>(CurrencyKey.data()), CurrencySize);
-        currency = currency_temp;
-        logging::print("[AllowanceCurrent] Currency:", currency, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[AllowanceCurrent] Currency:", currency, true);
 
-    logging::print("[AllowanceDelegate] Res4");
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-        logging::print("[AllowanceDelegate] Amount:", amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    logging::print("[AllowanceDelegate] Amount:", amount, true);
+
+    std::string months_temp;
+    if (!read_wasm_param(MemCxt, MonthsPointer, MonthsSize, months_temp))
     {
-        return Res4;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceDelegate] Res5");
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, MonthsKey.data(), MonthsPointer, MonthsSize);
-    if (WasmEdge_ResultOK(Res5))
+    if (months_temp != "N/A" && !isValidUint32(months_temp))
     {
-        std::string months_temp(reinterpret_cast<char *>(MonthsKey.data()), MonthsSize);
-        if (months_temp != "N/A" && !isValidUint32(months_temp))
-        {
-            logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
+        logging::print("[AllowanceSender] Res5 FAILED: Invalid uint32_t for months", months_temp, true);
 
-            std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        months = months_temp;
-
-        logging::print("[AllowanceDelegate] Months:", months, true);
+        std::string result = "[AllowanceSender] FAILED: Invalid uint32_t for months";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
     }
-    else
+    months = months_temp;
+    logging::print("[AllowanceDelegate] Months:", months, true);
+
+    std::string seconds_temp;
+    if (!read_wasm_param(MemCxt, SecondsPointer, SecondsSize, seconds_temp))
     {
-        return Res5;
+        return WasmEdge_Result_Terminate;
     }
-
-    logging::print("[AllowanceDelegate] Res 6");
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, SecondsKey.data(), SecondsPointer, SecondsSize);
-    if (WasmEdge_ResultOK(Res6))
+    if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
     {
-        std::string seconds_temp(reinterpret_cast<char *>(SecondsKey.data()), SecondsSize);
-        if (seconds_temp != "N/A" && !isValidUint32(seconds_temp))
-        {
-            std::string result = "[AllowanceDelegate] FAILED: Invalid uint32_t for seconds";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
+        std::string result = "[AllowanceDelegate] FAILED: Invalid uint32_t for seconds";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    seconds = seconds_temp;
+    logging::print("[AllowanceDelegate] Seconds:", seconds, true);
 
-        // Convert string to uint32_t
-        seconds = seconds_temp;
+    std::string start_temp;
+    if (!read_wasm_param(MemCxt, StartPointer, StartSize, start_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    if (start_temp != "N/A" && !isValidUint32(start_temp))
+    {
+        std::string result = "[AllowanceDelegate] FAILED: Invalid uint32_t for start time";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+    start = start_temp;
+    logging::print("[AllowanceDelegate] Start Time:", start, true);
 
-        logging::print("[AllowanceDelegate] Seconds:", seconds, true);
-    }
-    else
+    std::string authorize_temp;
+    if (!read_wasm_param(MemCxt, AuthorizePointer, AuthorizeSize, authorize_temp))
     {
-        return Res6;
+        return WasmEdge_Result_Terminate;
     }
+    authorize = (authorize_temp == "true");
+    logging::print("[AllowanceDelegate] Authorize:", authorize_temp, true);
 
-    logging::print("[AllowanceDelegate] Res 7");
-    WasmEdge_Result Res7 = WasmEdge_MemoryInstanceGetData(MemCxt, StartKey.data(), StartPointer, StartSize);
-    if (WasmEdge_ResultOK(Res7))
+    std::string delegate_temp;
+    if (!read_wasm_param(MemCxt, DelegatePointer, DelegateSize, delegate_temp))
     {
-        std::string start_temp(reinterpret_cast<char *>(StartKey.data()), StartSize);
-        if (start_temp != "N/A" && !isValidUint32(start_temp))
-        {
-            std::string result = "[AllowanceDelegate] FAILED: Invalid uint32_t for start time";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Success;
-        }
-
-        start = start_temp;
-        logging::print("[AllowanceDelegate] Start Time:", start, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res7;
-    }
-
-    logging::print("[AllowanceDelegate] Res8");
-    WasmEdge_Result Res8 = WasmEdge_MemoryInstanceGetData(MemCxt, AuthorizeKey.data(), AuthorizePointer, AuthorizeSize);
-    if (WasmEdge_ResultOK(Res8))
-    {
-        std::string authorize_temp(reinterpret_cast<char *>(AuthorizeKey.data()), AuthorizeSize);
-        authorize = (authorize_temp == "true");
-        logging::print("[AllowanceDelegate] Authorize:", authorize_temp, true);
-    }
-    else
-    {
-        return Res8;
-    }
-
-    WasmEdge_Result Res9 = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateKey.data(), DelegatePointer, DelegateSize);
-
-    if (WasmEdge_ResultOK(Res9))
-    {
-        std::string delegate_temp(reinterpret_cast<char *>(DelegateKey.data()), DelegateSize);
-        auto delegate_vec = base58_decode(delegate_temp);
-        delegate_wallet = std::string(delegate_vec.begin(), delegate_vec.end());
-        logging::print("[AllowanceDelegate] delegate_wallet:", delegate_temp, true);
-    }
-    else
-    {
-        return Res9;
-    }
+    auto delegate_vec = base58_decode(delegate_temp);
+    delegate_wallet = std::string(delegate_vec.begin(), delegate_vec.end());
+    logging::print("[AllowanceDelegate] delegate_wallet:", delegate_temp, true);
 
     SenderDataType* sender = (SenderDataType *)Data;
 

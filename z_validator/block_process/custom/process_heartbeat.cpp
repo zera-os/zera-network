@@ -4,7 +4,7 @@
 
 namespace
 {
-    ZeraStatus process_heartbeat_fees(const zera_txn::ValidatorHeartbeat *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const zera_txn::PublicKey &public_key, const std::string& fee_address, const bool &sc_txn)
+    ZeraStatus process_heartbeat_fees(const zera_txn::ValidatorHeartbeat *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const zera_txn::PublicKey &public_key, const std::string& fee_address, const bool &sc_txn, const std::string &sc_fee_address)
     {
         uint256_t fee_type = get_txn_fee(txn_type);
 
@@ -36,7 +36,7 @@ namespace
         std::string wallet_key;
         if(sc_txn)
         {
-            wallet_key = txn->base().sc_fee_address();
+            wallet_key = sc_fee_address;
         }
         else
         {
@@ -49,7 +49,7 @@ namespace
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::ValidatorHeartbeat>(const zera_txn::ValidatorHeartbeat *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::ValidatorHeartbeat>(const zera_txn::ValidatorHeartbeat *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     zera_txn::Validator validator;
     std::string validator_str;
@@ -73,7 +73,7 @@ ZeraStatus block_process::process_txn<zera_txn::ValidatorHeartbeat>(const zera_t
         return status;
     }
 
-    status = process_heartbeat_fees(txn, status_fees, txn_type, validator.public_key(), fee_address, sc_txn);
+    status = process_heartbeat_fees(txn, status_fees, txn_type, validator.public_key(), fee_address, sc_txn, sc_fee_address);
 
     if (!status.ok())
     {

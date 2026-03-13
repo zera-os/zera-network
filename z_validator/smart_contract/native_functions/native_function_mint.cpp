@@ -33,7 +33,7 @@ namespace
         block_txns.ParseFromString(value);
 
         std::string fee_address = sender.fee_address;
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::MINT_TYPE, false, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::MINT_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
         if (status.ok())
         {
             sender.txn_hashes.push_back(txn.base().hash());
@@ -133,57 +133,29 @@ WasmEdge_Result Mint(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[Mint] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-
-        amount = amount_temp;
+        return WasmEdge_Result_Terminate;
     }
-    else
+    if (!is_valid_uint256(amount))
     {
-        return Res2;
+        logging::print("[Mint] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res3;
+        return WasmEdge_Result_Terminate;
     }
 
     std::vector<uint8_t> wallet_decode;
@@ -231,74 +203,39 @@ WasmEdge_Result DelegateMint(void *Data, const WasmEdge_CallingFrameContext *Cal
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DelegateWalletKey(DelegateWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[DelegateMint] Contract ID:", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[DelegateMint] Contract ID:", contract_id, true);
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[Mint] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-
-        amount = amount_temp;
+        return WasmEdge_Result_Terminate;
     }
-    else
+    if (!is_valid_uint256(amount))
     {
-        return Res2;
+        logging::print("[DelegateMint] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-        logging::print("[DelegateMint] Wallet:", wallet, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[DelegateMint] Wallet:", wallet, true);
 
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateWalletKey.data(), DelegateWalletPointer, DelegateWalletSize);
     std::string delegate_wallet;
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, DelegateWalletPointer, DelegateWalletSize, delegate_wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(DelegateWalletKey.data()), DelegateWalletSize);
-        delegate_wallet = wallet_temp;
-        logging::print("[DelegateMint] Delegate Wallet:", delegate_wallet, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res4;
-    }
+    logging::print("[DelegateMint] Delegate Wallet:", delegate_wallet, true);
 
     std::vector<uint8_t> wallet_decode;
     if(wallet == ":fire:")
@@ -344,57 +281,29 @@ WasmEdge_Result CurrentMint(void *Data, const WasmEdge_CallingFrameContext *Call
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[Mint] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-
-        amount = amount_temp;
+        return WasmEdge_Result_Terminate;
     }
-    else
+    if (!is_valid_uint256(amount))
     {
-        return Res2;
+        logging::print("[CurrentMint] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res3;
+        return WasmEdge_Result_Terminate;
     }
 
     std::vector<uint8_t> wallet_decode;

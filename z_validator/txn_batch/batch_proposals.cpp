@@ -176,11 +176,13 @@ void txn_batch::batch_proposal_cancel(const zera_txn::TXNS &txns, const std::map
 {
     rocksdb::WriteBatch proposal_cancel_batch;
     rocksdb::WriteBatch staked_coins_voted_batch;
+    rocksdb::WriteBatch process_adaptive_ledger_batch;
     for (auto proposal_cancel : txns.proposal_cancel_txns())
     {
         if (txn_passed.at(proposal_cancel.base().hash()))
         {
             proposal_cancel_batch.Delete(proposal_cancel.proposal_id());
+            process_adaptive_ledger_batch.Delete(proposal_cancel.proposal_id());
 
             zera_txn::InstrumentContract contract;
             block_process::get_contract(proposal_cancel.contract_id(), contract);
@@ -224,6 +226,8 @@ void txn_batch::batch_proposal_cancel(const zera_txn::TXNS &txns, const std::map
             } 
         }
     }
+ 
+    db_process_adaptive_ledger::store_batch(process_adaptive_ledger_batch);
     db_staked_coins_voted::store_batch(staked_coins_voted_batch);
     db_proposals::store_batch(proposal_cancel_batch);
 }

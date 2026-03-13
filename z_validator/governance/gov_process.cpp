@@ -213,6 +213,7 @@ namespace
         result->set_support_cur_equiv(boost::lexical_cast<std::string>(yes_amount));
         result->set_against_cur_equiv(boost::lexical_cast<std::string>(no_amount));
         result->set_passed(calculate_passed(result->support_cur_equiv(), result->against_cur_equiv(), contract, fast_quorum));
+
     }
 
     bool calculate_passed_options(const zera_txn::ProposalResult *result, const zera_txn::InstrumentContract &contract, bool fast_quorum = false)
@@ -470,7 +471,8 @@ namespace
             sign_hash_result(result);
             return ZeraStatus();
         }
-        return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_proposal.cpp: process_fees: " + proposal_id + " Proposal does not exist.", zera_txn::TXN_STATUS::INVALID_PROPOSAL);
+        std::string base58_proposal_id = base58_encode(proposal_id);
+        return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_proposal.cpp: process_fees: " + base58_proposal_id + " Proposal does not exist.", zera_txn::TXN_STATUS::INVALID_PROPOSAL);
     }
 
     bool check_staggered_adaptive(const zera_validator::Block *block, zera_txn::TXNWrapper &wrapper)

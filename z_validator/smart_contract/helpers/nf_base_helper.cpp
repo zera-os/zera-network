@@ -13,12 +13,11 @@ void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
     base->set_fee_id(sender.fee_id);
     base->set_safe_send(false);
     base->mutable_timestamp()->set_seconds(sender.block_time);
-    base->set_sc_fee_address(sender.fee_smart_contract_wallet);
 }
 
 std::string current_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
 {
-    std::string sc_auth = "sc_" + sender.current_smart_contract_instance;
+    std::string sc_auth = "sc_" + sender.current_smart_contract_instance_name;
     base->mutable_public_key()->set_smart_contract_auth(sc_auth);
     base->set_nonce(sender.sc_nonce);
     sender.sc_nonce++;
@@ -27,9 +26,38 @@ std::string current_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
     base->set_fee_id(sender.fee_id);
     base->set_safe_send(false);
     base->mutable_timestamp()->set_seconds(sender.block_time);
-    base->set_sc_fee_address(sender.fee_smart_contract_wallet);
 
     return sc_auth;
+}
+
+bool delegate_set_base_from_auth(zera_txn::BaseTXN *base, SenderDataType &sender, std::string &sc_auth)
+{
+    bool found = false;
+    for (auto &call : sender.call_chain)
+    {
+        if(call == sc_auth)
+        {
+            sc_auth = "sc_" + call;
+            found = true;
+            break;
+        }
+    }
+
+    if(!found)
+    {
+        return false;
+    }
+
+    base->mutable_public_key()->set_smart_contract_auth(sc_auth);
+
+    base->set_fee_amount("1000000000000");
+    base->set_fee_id(sender.fee_id);
+    base->set_safe_send(false);
+    base->mutable_timestamp()->set_seconds(sender.block_time);
+    base->set_nonce(sender.sc_nonce);
+    sender.sc_nonce++;
+
+    return true;
 }
 
 bool delegate_set_base(zera_txn::BaseTXN *base, SenderDataType &sender, const std::string &delegate_wallet, std::string &sc_auth)
@@ -59,7 +87,6 @@ bool delegate_set_base(zera_txn::BaseTXN *base, SenderDataType &sender, const st
     base->mutable_timestamp()->set_seconds(sender.block_time);
     base->set_nonce(sender.sc_nonce);
     sender.sc_nonce++;
-    base->set_sc_fee_address(sender.fee_smart_contract_wallet);
 
     return true;
 }
@@ -82,5 +109,4 @@ void sender_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
     base->set_fee_id(sender.fee_id);
     base->set_safe_send(false);
     base->mutable_timestamp()->set_seconds(sender.block_time);
-    base->set_sc_fee_address(sender.fee_smart_contract_wallet);
 }

@@ -5,6 +5,7 @@
 #include "smart_contract_sender_data.h"
 #include <google/protobuf/timestamp.pb.h>
 #include <google/protobuf/util/time_util.h>
+#include "nf_helpers.h"
 
 namespace
 {
@@ -34,11 +35,6 @@ namespace
 WasmEdge_Result DBGetAnyData(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                              const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-  /*
-   * Params: {i32, i32, i32}
-   * Returns: {i32}
-   */
-
   uint32_t KeyPointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t KeySize = WasmEdge_ValueGetI32(In[1]);
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
@@ -46,82 +42,55 @@ WasmEdge_Result DBGetAnyData(void *Data, const WasmEdge_CallingFrameContext *Cal
   uint32_t DBKeyPointer = WasmEdge_ValueGetI32(In[2]);
   uint32_t DBKeySize = WasmEdge_ValueGetI32(In[3]);
 
-  std::vector<unsigned char> Key(KeySize);
-  std::vector<unsigned char> DBKey(DBKeySize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-  // read data
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Key.data(), KeyPointer, KeySize);
+
   std::string keyString;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, KeyPointer, KeySize, keyString))
   {
-    // retrieve Value by Key
-    std::string tempKeyString(reinterpret_cast<char *>(Key.data()), KeySize);
-    keyString = tempKeyString;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, DBKey.data(), DBKeyPointer, DBKeySize);
-
-  if(WasmEdge_ResultOK(Res))
+  std::string dbKeyString;
+  if (!read_wasm_param(MemCxt, DBKeyPointer, DBKeySize, dbKeyString))
   {
-    std::string dbKeyString(reinterpret_cast<char *>(DBKey.data()), DBKeySize);
-
-    std::string raw_data;
-    raw_data = get_db_data(dbKeyString, keyString);
-
-    const char *val = raw_data.c_str();
-    const size_t len = raw_data.length();
-
-    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-    Out[0] = WasmEdge_ValueGenI32(len);
-
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res2;
-  }
+
+  std::string raw_data;
+  raw_data = get_db_data(dbKeyString, keyString);
+
+  const char *val = raw_data.c_str();
+  const size_t len = raw_data.length();
+
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
 }
 
 WasmEdge_Result DBGetData(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                           const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-  /*
-   * Params: {i32, i32, i32}
-   * Returns: {i32}
-   */
   uint32_t KeyPointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t KeySize = WasmEdge_ValueGetI32(In[1]);
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> Key(KeySize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-  // read data
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Key.data(), KeyPointer, KeySize);
-  if (WasmEdge_ResultOK(Res))
+
+  std::string keyString;
+  if (!read_wasm_param(MemCxt, KeyPointer, KeySize, keyString))
   {
-    // retrieve Value by Key
-    //
-    std::string keyString(reinterpret_cast<char *>(Key.data()), KeySize);
-
-    std::string raw_data;
-    db_smart_contracts::get_single(keyString, raw_data);
-
-    const char *val = raw_data.c_str();
-    const size_t len = raw_data.length();
-
-    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-    Out[0] = WasmEdge_ValueGenI32(len);
-
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+
+  std::string raw_data;
+  db_smart_contracts::get_single(keyString, raw_data);
+
+  const char *val = raw_data.c_str();
+  const size_t len = raw_data.length();
+
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
 }

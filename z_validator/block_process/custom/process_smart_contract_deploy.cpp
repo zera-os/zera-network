@@ -129,7 +129,7 @@ namespace
 }
 
 template <>
-ZeraStatus block_process::process_txn<zera_txn::SmartContractTXN>(const zera_txn::SmartContractTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::SmartContractTXN>(const zera_txn::SmartContractTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
 
     logging::print("[ProcessSmartContractDeploy] deploying smart contract...", txn->smart_contract_name());
@@ -159,7 +159,7 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractTXN>(const zera_txn
     }
 
     // process base fees. If wallet cannot pay fees or anything else is wrong with the fees return failed txn
-    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_TYPE, fee_address, sc_txn);
+    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_TYPE, fee_address, sc_txn, sc_fee_address);
 
     if (!status.ok())
     {

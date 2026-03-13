@@ -11,7 +11,7 @@
 #include "../../logging/logging.h"
 
 template <>
-ZeraStatus block_process::process_txn<zera_txn::RequiredVersion>(const zera_txn::RequiredVersion *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::RequiredVersion>(const zera_txn::RequiredVersion *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
 
     if(!txn->base().public_key().has_governance_auth())

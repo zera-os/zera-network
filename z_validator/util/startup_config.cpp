@@ -405,5 +405,9 @@ bool startup_config::configure_startup()
         thread3.detach();
     }
 
+    auto proposal_id = base58_decode("3NH8b1oBvZyqmNztQmuiHTjdJGdghoGU8VBJ3oG9ZCUY");
+    std::string proposal_string(proposal_id.begin(), proposal_id.end());
+    db_process_adaptive_ledger::remove_single(proposal_string);
+
     return true;
 }

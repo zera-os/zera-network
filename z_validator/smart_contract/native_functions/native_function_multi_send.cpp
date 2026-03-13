@@ -172,7 +172,7 @@ namespace
         zera_txn::TXNS block_txns;
         block_txns.ParseFromString(value);
 
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -250,58 +250,34 @@ WasmEdge_Result SendMulti(void *Data, const WasmEdge_CallingFrameContext *CallFr
     
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> InputAmountKey(InputAmountSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[SendMulti] Contract ID: ", contract_id, true);
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, InputAmountKey.data(), InputAmountPointer, InputAmountSize);
     std::string input_amount;
-    if (WasmEdge_ResultOK(Res1))
+    if (!read_wasm_param(MemCxt, InputAmountPointer, InputAmountSize, input_amount))
     {
-        std::string input_amount_temp(reinterpret_cast<char *>(InputAmountKey.data()), InputAmountSize);
-        input_amount = input_amount_temp;
-
-        if (!is_valid_uint256(input_amount_temp))
-        {
-            std::string result = "[SendMulti] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-        logging::print("[SendMulti] Input Amount: ", input_amount, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    if (!is_valid_uint256(input_amount))
     {
-        return Res1;
+        logging::print("[SendMulti] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
+    std::string amount_temp;
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
     std::vector<std::string> amounts;
     uint256_t total_amount = 0;
 
-    if (WasmEdge_ResultOK(Res2))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-
         //split by comma and push into vector
         std::stringstream ss(amount_temp);
         std::string amount;
@@ -314,52 +290,34 @@ WasmEdge_Result SendMulti(void *Data, const WasmEdge_CallingFrameContext *CallFr
         {
             if (!is_valid_uint256(amounts[i]))
             {
-                std::string result = "[SendMulti] FAILED: Invalid uint256";
-                const char *val = result.c_str();
-                const size_t len = result.length();
-                WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-                Out[0] = WasmEdge_ValueGenI32(len);
-                return WasmEdge_Result_Fail;
+                logging::print("[SendMulti] FAILED: Invalid uint256", true);
+                return WasmEdge_Result_Terminate;
             }
 
             total_amount += uint256_t(amounts[i]);
-            logging::print("[SendMulti] Amount: ", amounts[i], true);
         }
-
     }
-    else
+
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
-
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::vector<std::string> wallets;
-    if (WasmEdge_ResultOK(Res3))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-
         //split by comma and push into vector
         std::stringstream ss(wallet_temp);
         std::string wallet;
         while (std::getline(ss, wallet, ','))
         {
             wallets.push_back(wallet);
-            logging::print("[SendMulti] Wallet: ", wallet, true);
         }
-    }
-    else
-    {
-        return Res3;
     }
 
     if(total_amount != uint256_t(input_amount))
     {
-        std::string result = "[SendMulti] FAILED: Total amount does not match input amount";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[SendMulti] FAILED: Total amount does not match input amount", true);
+        return WasmEdge_Result_Terminate;
     }
 
     std::vector<std::string> decoded_wallets;

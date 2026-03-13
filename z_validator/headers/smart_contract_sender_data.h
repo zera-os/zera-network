@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include "block_emit_type.h"
 
 struct SenderDataType
 {
@@ -22,7 +23,7 @@ struct SenderDataType
   std::string smart_contract_wallet;              // Smart contract wallet (Temp change on Call)
   std::vector<std::string> call_chain;            // Call chain (Temp remove/reset on Call | Add on DelegateCall)
   std::vector<std::string> wallet_chain;          // Wallet chain (Temp remove/reset on Call | Add on DelegateCall)
-  std::string current_smart_contract_instance;    // Current smart contract instance (Changes every Call/DelegateCall)
+  std::string current_smart_contract_instance_name;    // Current smart contract instance (Changes every Call/DelegateCall)
   std::string fee_smart_contract_instance;        // Fee smart contract instance (Never changes)
   std::string fee_smart_contract_wallet;          // Fee smart contract wallet (Never changes)
   std::vector<std::string> txn_hashes;            // Transaction hashes made by the smart contract (is not effected by Call/DelegateCall)
@@ -35,4 +36,10 @@ struct SenderDataType
   uint64_t sc_nonce;                               // Smart contract nonce (Increases after every txn)
   std::map<std::string, std::string> derived_wallets; // Derived wallets (key = base58-encoded wallet address, value = smart contract store key)
   std::string fee_id;                                // Fee ID (Never changes)
+  std::map<std::string, BlockEmitType> block_emits; // Persistent emits keyed by contract instance (never cleared/restored on Call/DelegateCall)
+  std::string original_smart_contract_instance_name; // Original smart contract instance (Never changes)
+  std::string current_function; // Current function (Changes every Call/DelegateCall)
+  std::string current_smart_contract_instance; // Current smart contract instance (Changes every Call/DelegateCall)
+  std::string current_smart_contract_name; // Current smart contract name (Changes every Call/DelegateCall)
+  bool panic;                                 // Panic flag (True if the smart contract panics)
 };

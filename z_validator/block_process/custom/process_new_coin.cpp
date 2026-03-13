@@ -214,7 +214,7 @@ namespace
 
         return status;
     }
-    ZeraStatus process_contract_fees(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const bool allowance, const bool sc_txn)
+    ZeraStatus process_contract_fees(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const bool allowance, const bool sc_txn, const std::string &sc_fee_address)
     {
         std::string contract_fee_symbol = txn->contract_id();
         zera_txn::InstrumentContract contract;
@@ -294,7 +294,7 @@ namespace
             //CHANGELOG: added sc_fee address for sc_txns
             if(sc_txn)
             {
-                wallet_adr = txn->base().sc_fee_address();
+                wallet_adr = sc_fee_address;
             }
             else
             {
@@ -337,7 +337,7 @@ namespace
 
         return ZeraStatus();
     }
-    ZeraStatus process_base_fees(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const bool allowance, const bool sc_txn)
+    ZeraStatus process_base_fees(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address, const bool allowance, const bool sc_txn, const std::string &sc_fee_address)
     {
         ZeraStatus status;
         uint256_t fee_type(get_txn_fee(zera_txn::TRANSACTION_TYPE::COIN_TYPE));
@@ -436,8 +436,6 @@ namespace
             }
         }
 
-        logging::print("FEE AMOUNT!!!", txn_fee_amount.str(), true);
-        logging::print("TXN_SIZE!!!", std::to_string(txn->ByteSize()), true);
         if (!allowance)
         {
             int x = 0;
@@ -461,7 +459,7 @@ namespace
 
                 if(sc_txn)
                 {
-                    wallet_key = txn->base().sc_fee_address();
+                    wallet_key = sc_fee_address;
                 }
                 else
                 {
@@ -562,6 +560,10 @@ namespace
 
             if (sender_balance < increment)
             {
+                logging::print("sender_balance", sender_balance.str());
+                logging::print("increment", increment.str());
+                logging::print("wallet_adr", base58_encode(wallet_adr));
+                logging::print("contract_id", txn->contract_id());
                 return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_coin.cpp: process_transfers: Insufficient funds input amount.", zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);
             }
 
@@ -639,7 +641,7 @@ namespace
 
         return ZeraStatus();
     }
-    ZeraStatus check_transfer_parameters(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const bool allowance, const bool gov)
+    ZeraStatus check_transfer_parameters(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const bool allowance, const bool gov, const std::string &sc_fee_address)
     {
         ZeraStatus status;
         status = zera_fees::process_interface_fees(txn, status_fees);
@@ -669,7 +671,7 @@ namespace
         {
             return status;
         }
-        status = process_contract_fees(txn, status_fees, fee_address, allowance, sc_txn);
+        status = process_contract_fees(txn, status_fees, fee_address, allowance, sc_txn, sc_fee_address);
 
         if (!status.ok())
         {
@@ -780,7 +782,7 @@ namespace
 }
 
 template <>
-ZeraStatus block_process::process_txn<zera_txn::CoinTXN>(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::CoinTXN>(const zera_txn::CoinTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     bool gov = false;
     bool allowance = false;
@@ -828,14 +830,14 @@ ZeraStatus block_process::process_txn<zera_txn::CoinTXN>(const zera_txn::CoinTXN
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_coin.cpp: process_txn: Governance auth not found", zera_txn::TXN_STATUS::INVALID_PARAMETERS);
     }
 
-    ZeraStatus status = process_base_fees(txn, status_fees, fee_address, allowance, sc_txn);
+    ZeraStatus status = process_base_fees(txn, status_fees, fee_address, allowance, sc_txn, sc_fee_address);
 
     if (!status.ok())
     {
         return status;
     }
 
-    status = check_transfer_parameters(txn, status_fees, txn_type, timed, fee_address, sc_txn, allowance, gov);
+    status = check_transfer_parameters(txn, status_fees, txn_type, timed, fee_address, sc_txn, allowance, gov, sc_fee_address);
     int x = 0;
 
     if (allowance && status.ok())

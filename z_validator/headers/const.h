@@ -4,7 +4,7 @@
 #include <string>
 #include <cstdlib>
 
-constexpr int VERSION = 100003; //version of the validator
+constexpr int VERSION = 100004; //version of the validator
 //1000000000000000000 1 dollar
 //10000000000000000   1 cent
 //1 000 000 000 000 000 000 1 dollar
@@ -45,9 +45,9 @@ inline const std::string TOKEN_MULTIPLIER = "TOKEN_MULTIPLIER";
 
 inline const std::string EVENT_MANAGEMENT_TEMP = "event_management_temp";
 inline const std::string NETWORK_FEE_PROXY = "network_fee_proxy_1<>NETWORK_SC";
-inline const std::string ACE_PROXY = "zera_dex_proxy_1<>ACE_";
-inline const std::string ZERA_DEX_PROXY = "zera_dex_proxy_1<>";
-inline const std::string ZERA_DEX_LP = "zera_dex_proxy_1<>LP_25$ZRA+0000";
+inline const std::string ACE_PROXY = "zera_dex_proxy_v1_1<>ACE_";
+inline const std::string ZERA_DEX_PROXY = "zera_dex_proxy_v1_1<>";
+inline const std::string ZERA_DEX_LP = "zera_dex_proxy_v1_1<>LP_25$ZRA+0000";
 inline const std::string RESTRICTED_PROXY = "restricted_symbols_proxy_1<>RESTRICTED_SC";
 inline const std::string CIRCULATING_SUPPLY_CONTRACT = "circulating_supply_proxy_1<>WHITELIST_SC";
 inline const std::string STAKING_PROXY_CONTRACT = "staking_proxy_1<>";

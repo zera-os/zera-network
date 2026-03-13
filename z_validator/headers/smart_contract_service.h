@@ -5,7 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
-
+#include "block_emit_type.h"
 
 
 class smart_contract_service
@@ -29,11 +29,12 @@ public:
       uint64_t& used_gas,
       std::vector<std::string>& txn_hashes,
       std::map<std::string, std::string>& derived_wallets,
-      const bool &sc_fees,
-      const std::string &fee_id);
+      const std::string &fee_id,
+      std::map<std::string, BlockEmitType> &block_emits,
+      bool &panic);
   static std::vector<std::any> runCall(std::string smart_contract_instance,const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv);
-  static std::vector<std::any> run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes);
-  static std::vector<std::any> runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes);
+  static std::vector<std::any> run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes, bool &panic);
+  static std::vector<std::any> runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes, bool &panic);
   static std::vector<std::any> runCallScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params);
   static bool gov_key(const std::string &str) {
     return str.rfind("gov_", 0) == 0; // Check if "gov_" is at the start of the string

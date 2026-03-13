@@ -38,7 +38,7 @@ namespace
         block_txns.ParseFromString(value);
 
         std::string fee_address = sender.fee_address;
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, true, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, true, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -84,58 +84,40 @@ WasmEdge_Result ExpenseRatio(void *Data, const WasmEdge_CallingFrameContext *Cal
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AddressesKey(AddressesSize);
-    std::vector<unsigned char> OutputKey(OutputSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
+    std::string contract_temp;
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
     zera_txn::ExpenseRatioTXN txn;
-    if (WasmEdge_ResultOK(Res))
+    txn.set_contract_id(contract_temp);
+    logging::print("[ExpenseRatio] Contract ID: ", contract_temp, false);
+
+    std::string adrs_temp;
+    if (!read_wasm_param(MemCxt, AddressesPointer, AddressesSize, adrs_temp))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        txn.set_contract_id(contract_temp);
-        logging::print("[ExpenseRatio] Contract ID: ", contract_temp, false);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    std::vector<std::string> addresses_temp = getWords(adrs_temp, "##");
+    logging::print("[ExpenseRatio] Addresses: ", adrs_temp, true);
+    for(auto &address : addresses_temp)
     {
-        return Res;
+        auto vec = base58_decode(address);
+        std::string address_temp(vec.begin(), vec.end());
+        txn.add_addresses(address_temp);
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AddressesKey.data(), AddressesPointer, AddressesSize);
-    std::vector<std::string> addresses;
-    if (WasmEdge_ResultOK(Res2))
+    std::string output_temp;
+    if (!read_wasm_param(MemCxt, OutputPointer, OutputSize, output_temp))
     {
-        std::string adrs_temp(reinterpret_cast<char *>(AddressesKey.data()), AddressesSize);
-        std::vector<std::string> addresses_temp = getWords(adrs_temp, "##");
-        logging::print("[ExpenseRatio] Addresses: ", adrs_temp, true);
-        for(auto &address : addresses_temp)
-        {
-            auto vec = base58_decode(address);
-            std::string address_temp(vec.begin(), vec.end());
-            txn.add_addresses(address_temp);
-        }
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
-
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, OutputKey.data(), OutputPointer, OutputSize);
-    std::string output_adr;
-    if (WasmEdge_ResultOK(Res3))
-    {
-        std::string output_temp(reinterpret_cast<char *>(OutputKey.data()), OutputSize);
-        logging::print("[ExpenseRatio] Output Address: ", output_temp, true);
-        auto vec = base58_decode(output_temp);
-        std::string temp(vec.begin(), vec.end());
-        txn.set_output_address(temp);
-    }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[ExpenseRatio] Output Address: ", output_temp, true);
+    auto vec = base58_decode(output_temp);
+    std::string temp(vec.begin(), vec.end());
+    txn.set_output_address(temp);
 
     std::string status = create_expense(*sender, txn);
 

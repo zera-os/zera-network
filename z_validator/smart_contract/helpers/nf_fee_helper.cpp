@@ -22,7 +22,6 @@ void calc_fee(zera_txn::BaseTXN *base, const std::string &fee_id, const uint64_t
     uint256_t denomination(denomination_str);
     txn_fee_amount = (fee * denomination) / equiv;
 
-
     uint256_t key_fee = get_key_fee(base->public_key());
     txn_fee_amount += (key_fee * denomination) / equiv;
 
@@ -102,23 +101,15 @@ void calc_fee_contract_txn(zera_txn::InstrumentContract *txn, const std::string 
     int byte_size = txn->ByteSize() + 128;
     std::string denomination_str = fee_contract.coin_denomination().amount();
 
-    logging::print("FEE PER BYTE!!!", fee_per_byte.str(), true);
-    logging::print("BYTE SIZE!!!", std::to_string(byte_size), true);
-    logging::print("DENOMINATION!!!", denomination_str, true);
-    logging::print("EQUIV!!!", equiv.str(), true);
-
     uint256_t fee = fee_per_byte * byte_size;
     uint256_t denomination(denomination_str);
     txn_fee_amount = (fee * denomination) / equiv;
 
-    logging::print("FEE!!!", fee.str(), true);
 
 
     uint256_t key_fee = get_key_fee(txn->base().public_key());
-    logging::print("KEY FEE!!!", key_fee.str(), true);
     txn_fee_amount += (key_fee * denomination) / equiv;
 
-    logging::print("TXN FEE AMOUNT!!!", txn_fee_amount.str(), true);
 
     int x = 0;
     uint256_t normalized_fee = 0;
@@ -128,7 +119,6 @@ void calc_fee_contract_txn(zera_txn::InstrumentContract *txn, const std::string 
         {
             uint256_t first_time_wallet_fee = get_fee(FIRST_TIME_WALLET_FEE);
             normalized_fee = (first_time_wallet_fee * denomination) / equiv;
-            logging::print("NORMALIZED FEE!!!", normalized_fee.str(), true);
         }
 
         txn_fee_amount += normalized_fee;
@@ -136,13 +126,11 @@ void calc_fee_contract_txn(zera_txn::InstrumentContract *txn, const std::string 
     }
 
 
-    logging::print("TXN FEE AMOUNT!!!", txn_fee_amount.str(), true);
     if (fee_id != NETWORK_CONTRACT)
     {
         uint256_t token_multiplier = get_fee(TOKEN_MULTIPLIER);
         txn_fee_amount *= token_multiplier;
     }
-    logging::print("TXN FEE AMOUNT!!!", txn_fee_amount.str(), true);
     txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
 }
 

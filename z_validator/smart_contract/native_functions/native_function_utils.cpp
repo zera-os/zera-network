@@ -15,6 +15,7 @@
 #include "hashing.h"
 #include "utils.h"
 #include "wallet.pb.h"
+#include "nf_helpers.h"
 
 WasmEdge_Result WalletAddress(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                               const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -116,37 +117,31 @@ WasmEdge_Result ContractExists(void *Data, const WasmEdge_CallingFrameContext *C
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
-  if (WasmEdge_ResultOK(Res))
+  std::string contract_id;
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    std::string exist;
+    return WasmEdge_Result_Terminate;
+  }
 
-    if (db_contracts::exist(contract_id))
-    {
-      exist = "true";
-    }
-    else
-    {
-      exist = "false";
-    }
+  std::string exist;
 
-    const char *val = exist.c_str();
-    const size_t len = exist.length();
-    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-    Out[0] = WasmEdge_ValueGenI32(len);
-
-    return WasmEdge_Result_Success;
+  if (db_contracts::exist(contract_id))
+  {
+    exist = "true";
   }
   else
   {
-    return Res;
+    exist = "false";
   }
+
+  const char *val = exist.c_str();
+  const size_t len = exist.length();
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
 }
 
 WasmEdge_Result ContractDenomination(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
@@ -157,34 +152,27 @@ WasmEdge_Result ContractDenomination(void *Data, const WasmEdge_CallingFrameCont
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
-  if (WasmEdge_ResultOK(Res))
+  std::string contract_id;
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-
-    std::string value;
-    zera_txn::InstrumentContract contract;
-    db_contracts::get_single(contract_id, value);
-    contract.ParseFromString(value);
-
-    std::string denomination = contract.coin_denomination().amount();
-
-    const char *val = denomination.c_str();
-    const size_t len = denomination.length();
-    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-    Out[0] = WasmEdge_ValueGenI32(len);
-
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+
+  std::string value;
+  zera_txn::InstrumentContract contract;
+  db_contracts::get_single(contract_id, value);
+  contract.ParseFromString(value);
+
+  std::string denomination = contract.coin_denomination().amount();
+
+  const char *val = denomination.c_str();
+  const size_t len = denomination.length();
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
 }
 
 WasmEdge_Result WalletTokens(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
@@ -195,46 +183,39 @@ WasmEdge_Result WalletTokens(void *Data, const WasmEdge_CallingFrameContext *Cal
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> WalletKey(WalletSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-
-  if (WasmEdge_ResultOK(Res))
+  std::string wallet_temp;
+  if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
   {
-    std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-
-    auto wallet = base58_decode(wallet_temp);
-    std::string wallet_str(wallet.begin(), wallet.end());
-    std::string wallet_key = "TOKEN_LOOKUP_" + wallet_str;
-    std::string data;
-    zera_validator::TokenLookup token_lookup;
-    db_wallet_lookup::get_single(wallet_key, data);
-    token_lookup.ParseFromString(data);
-    std::string token_str = "";
-    for (auto token : token_lookup.tokens())
-    {
-      token_str += token + ",";
-    }
-
-    if (!token_str.empty())
-    {
-      token_str.pop_back();
-    }
-
-    const char *val = token_str.c_str();
-    const size_t len = token_str.length();
-    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-
-    Out[0] = WasmEdge_ValueGenI32(len);
-
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
-  else
+
+  auto wallet = base58_decode(wallet_temp);
+  std::string wallet_str(wallet.begin(), wallet.end());
+  std::string wallet_key = "TOKEN_LOOKUP_" + wallet_str;
+  std::string data;
+  zera_validator::TokenLookup token_lookup;
+  db_wallet_lookup::get_single(wallet_key, data);
+  token_lookup.ParseFromString(data);
+  std::string token_str = "";
+  for (auto token : token_lookup.tokens())
   {
-    return Res;
+    token_str += token + ",";
   }
+
+  if (!token_str.empty())
+  {
+    token_str.pop_back();
+  }
+
+  const char *val = token_str.c_str();
+  const size_t len = token_str.length();
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
 }
 
 WasmEdge_Result SmartContractBalance(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
@@ -243,23 +224,14 @@ WasmEdge_Result SmartContractBalance(void *Data, const WasmEdge_CallingFrameCont
   uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
 
-  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[3]);
-
-  std::vector<unsigned char> ContractKey(ContractSize);
+  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
   SenderDataType *sender = (SenderDataType *)Data;
@@ -291,36 +263,21 @@ WasmEdge_Result WalletBalance(void *Data, const WasmEdge_CallingFrameContext *Ca
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-  std::vector<unsigned char> WalletKey(WalletSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-  std::string wallet;
-  if (WasmEdge_ResultOK(Res2))
+  std::string wallet_temp;
+  if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
   {
-    std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-    auto wal_vec = base58_decode(wallet_temp);
-    wallet = std::string(wal_vec.begin(), wal_vec.end());
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res2;
-  }
+  auto wal_vec = base58_decode(wallet_temp);
+  std::string wallet(wal_vec.begin(), wal_vec.end());
   std::string wallet_key = wallet + contract_id;
   std::string balance_data;
 
@@ -350,21 +307,12 @@ WasmEdge_Result CirculatingSupply(void *Data, const WasmEdge_CallingFrameContext
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
   uint256_t circ_supply = get_circulating_supply(contract_id);
@@ -395,23 +343,14 @@ WasmEdge_Result CurrentSmartContractBalance(void *Data, const WasmEdge_CallingFr
   uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
 
-  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[3]);
-
-  std::vector<unsigned char> ContractKey(ContractSize);
+  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
   SenderDataType *sender = (SenderDataType *)Data;
@@ -513,35 +452,18 @@ WasmEdge_Result Compliance(void *Data, const WasmEdge_CallingFrameContext *CallF
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-  std::vector<unsigned char> WalletKey(WalletSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
-
-  WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
 
   std::string wallet_adr;
-  if (WasmEdge_ResultOK(Res1))
+  if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_adr))
   {
-    std::string wallet_adr_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-    wallet_adr = wallet_adr_temp;
-  }
-  else
-  {
-    return Res1;
+    return WasmEdge_Result_Terminate;
   }
 
   auto wallet_vec = base58_decode(wallet_adr);
@@ -578,35 +500,18 @@ WasmEdge_Result ComplianceLevels(void *Data, const WasmEdge_CallingFrameContext 
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-  std::vector<unsigned char> WalletKey(WalletSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
   std::string contract_id;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
   {
-    std::string contract_id_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    contract_id = contract_id_temp;
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
-
-  WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
 
   std::string wallet_adr;
-  if (WasmEdge_ResultOK(Res1))
+  if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_adr))
   {
-    std::string wallet_adr_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-    wallet_adr = wallet_adr_temp;
-  }
-  else
-  {
-    return Res1;
+    return WasmEdge_Result_Terminate;
   }
 
   auto wallet_vec = base58_decode(wallet_adr);
@@ -658,50 +563,28 @@ WasmEdge_Result VerifySignature(void *Data, const WasmEdge_CallingFrameContext *
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-  std::vector<unsigned char> MessageKey(MessageSize);
-  std::vector<unsigned char> SignatureKey(SignatureSize);
-  std::vector<unsigned char> PublicKeyKey(PublicKeySize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, MessageKey.data(), MessagePointer, MessageSize);
-
   std::string message;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, MessagePointer, MessageSize, message))
   {
-    std::string MessageKey_temp(reinterpret_cast<char *>(MessageKey.data()), MessageSize);
-    message = MessageKey_temp;
-
-    logging::print("[VerifySignature] Message", message, true);
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+  logging::print("[VerifySignature] Message", message, true);
 
-  WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, SignatureKey.data(), SignaturePointer, SignatureSize);
   std::string signature;
-  if (WasmEdge_ResultOK(Res1))
+  if (!read_wasm_param(MemCxt, SignaturePointer, SignatureSize, signature))
   {
-    std::string SignatureKey_temp(reinterpret_cast<char *>(SignatureKey.data()), SignatureSize);
-    signature = SignatureKey_temp;
-
-    logging::print("[VerifySignature] Signature", signature, true);
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res1;
-  }
+  logging::print("[VerifySignature] Signature", signature, true);
 
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, PublicKeyKey.data(), PublicKeyPointer, PublicKeySize);
   std::string public_key;
-  if (WasmEdge_ResultOK(Res2))
+  if (!read_wasm_param(MemCxt, PublicKeyPointer, PublicKeySize, public_key))
   {
-    std::string PublicKeyKey_temp(reinterpret_cast<char *>(PublicKeyKey.data()), PublicKeySize);
-    public_key = PublicKeyKey_temp;
-
-    logging::print("[VerifySignature] Public Key", public_key, true);
+    return WasmEdge_Result_Terminate;
   }
+  logging::print("[VerifySignature] Public Key", public_key, true);
 
   std::string return_string = "false";
   if (signatures::verify_message(message, signature, public_key))
@@ -728,32 +611,21 @@ WasmEdge_Result Hash(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-  std::vector<unsigned char> DataKey(DataSize);
-  std::vector<unsigned char> HashKey(HashSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, DataKey.data(), DataPointer, DataSize);
   std::string data;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, DataPointer, DataSize, data))
   {
-    std::string DataKey_temp(reinterpret_cast<char *>(DataKey.data()), DataSize);
-    data = DataKey_temp;
-    logging::print("[Hash] Data", data, true);
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+  logging::print("[Hash] Data", data, true);
 
-  WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, HashKey.data(), HashPointer, HashSize);
   std::string hash;
-  if (WasmEdge_ResultOK(Res1))
+  if (!read_wasm_param(MemCxt, HashPointer, HashSize, hash))
   {
-    std::string HashKey_temp(reinterpret_cast<char *>(HashKey.data()), HashSize);
-    hash = HashKey_temp;
-    logging::print("[Hash] Hash", hash, true);
+    return WasmEdge_Result_Terminate;
   }
+  logging::print("[Hash] Hash", hash, true);
 
   std::vector<uint8_t> data_vec(data.begin(), data.end());
   std::vector<uint8_t> hash_vec;
@@ -834,32 +706,21 @@ WasmEdge_Result SmartContractExists(void *Data, const WasmEdge_CallingFrameConte
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-  std::vector<unsigned char> ContractKey(ContractSize);
-  std::vector<unsigned char> InstanceKey(InstanceSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
   std::string smart_contract;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, smart_contract))
   {
-    std::string ContractKey_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-    smart_contract = ContractKey_temp;
-    logging::print("[SmartContractExists] Smart Contract", smart_contract, true);
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+  logging::print("[SmartContractExists] Smart Contract", smart_contract, true);
 
-  WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, InstanceKey.data(), InstancePointer, InstanceSize);
   std::string instance;
-  if (WasmEdge_ResultOK(Res1))
+  if (!read_wasm_param(MemCxt, InstancePointer, InstanceSize, instance))
   {
-    std::string InstanceKey_temp(reinterpret_cast<char *>(InstanceKey.data()), InstanceSize);
-    instance = InstanceKey_temp;
-    logging::print("[SmartContractExists] Instance", instance, true);
+    return WasmEdge_Result_Terminate;
   }
+  logging::print("[SmartContractExists] Instance", instance, true);
 
   std::string smart_contract_instance = smart_contract + "_" + instance;
 
@@ -889,23 +750,15 @@ WasmEdge_Result WalletExists(void *Data, const WasmEdge_CallingFrameContext *Cal
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> WalletKey(WalletSize);
-
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-
-  std::string wallet;
-  if (WasmEdge_ResultOK(Res))
+  std::string wallet_temp;
+  if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
   {
-    std::string WalletKey_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-    auto wallet_vec = base58_decode(WalletKey_temp);
-    wallet = std::string(wallet_vec.begin(), wallet_vec.end());
+    return WasmEdge_Result_Terminate;
   }
-  else
-  {
-    return Res;
-  }
+  auto wallet_vec = base58_decode(wallet_temp);
+  std::string wallet(wallet_vec.begin(), wallet_vec.end());
 
   std::string exist = "false";
   std::vector<std::string> keys;

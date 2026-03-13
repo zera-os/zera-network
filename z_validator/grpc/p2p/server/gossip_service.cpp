@@ -286,9 +286,27 @@ void ValidatorServiceImpl::ProcessGossipTXN(const TXType *request, std::string c
     // Start asynchronous processing of the request
     TXType *txn = new TXType();
     txn->CopyFrom(*request);
+
+
     if (recieved_txn_tracker::check_txn(txn->base().hash()))
     {
         logging::print("TXN already recieved");
+        delete txn;
+        return;
+    }
+
+    ZeraStatus status = verify_txns::verify_txn(txn);
+    
+    if (!status.ok())
+    {
+        status.prepend_message("validator_network_service_grpc.h: ProcessRequestAsync:");
+
+        if (status.code() != ZeraStatus::Code::DUPLICATE_TXN_ERROR)
+        {
+            rate_limiter.processUpdate(client_ip, true);
+            logging::print(status.read_status());
+        }
+
         delete txn;
         return;
     }

@@ -73,6 +73,8 @@ enum TXN_STATUS{
     FAULTY_TXN = 39;
     OUT_OF_GAS = 40;
     INVALID_ALLOWANCE = 41;
+    SMART_CONTRACT_PANIC = 42;
+    SMART_CONTRACT_CRASH = 43;
 }
 enum TRANSACTION_TYPE
 {
@@ -287,7 +289,6 @@ message BaseTXN{
     optional string interface_fee = 11;
     optional string interface_fee_id = 12;
     optional bytes interface_address = 13;
-    optional bytes sc_fee_address = 14;
 }
 message PublicKey{
     bytes single = 1;
@@ -476,7 +477,6 @@ message SmartContractTXN{
     LANGUAGE language = 3;
     repeated string functions = 5;
     //repeated string dependencies = 6;
-    optional bool sc_fees = 6;
 }
 message Parameters
 {
@@ -608,6 +608,12 @@ message DelegatedData{
     bytes address = 1;
     Token fee = 2;
 }
+message NestedResult{
+    string smart_contract_name = 1;
+    uint32 smart_contract_instance = 2;
+    string function = 3;
+    repeated string emits = 4;
+}
 message TXNStatusFees{
     bytes txn_hash = 1;
     TXN_STATUS status = 2;
@@ -623,6 +629,8 @@ message TXNStatusFees{
     repeated DelegatedData delegated_data = 14;
     optional string interface_fee = 15;
     optional string interface_fee_id = 16;
+    repeated NestedResult nested_results = 17;
+    optional bytes root_hash = 18; //root hash of the smart contract
 }
 message ProposalContract
 {

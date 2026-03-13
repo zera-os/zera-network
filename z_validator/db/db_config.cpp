@@ -82,6 +82,7 @@ void open_dbs()
     db_sc_temp::remove_all();
     db_staked_coins_voted_temp::remove_all();
     db_fee_tokens_temp::remove_all();
+    db_sc_subscriber::remove_all();
 
     std::vector<std::string> keys;
     std::vector<std::string> values;

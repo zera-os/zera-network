@@ -33,10 +33,10 @@ public:
     static ZeraStatus check_parameters(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address = "");
 
     template <typename TXType>
-    static ZeraStatus process_txn(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed = false, const std::string& fee_address = "", bool sc_txn = false);
+    static ZeraStatus process_txn(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed = false, const std::string& fee_address = "", bool sc_txn = false, const std::string &sc_fee_address = "");
 
     template <typename TXType>
-    static ZeraStatus process_txn(const TXType *txn, zera_txn::TXNStatusFees &status_fees, zera_txn::ExpenseRatioResult *result, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address = "", bool sc_txn = false);
+    static ZeraStatus process_txn(const TXType *txn, zera_txn::TXNStatusFees &status_fees, zera_txn::ExpenseRatioResult *result, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address = "", bool sc_txn = false, const std::string &sc_fee_address = "");
 
     template <typename TXType>
     static ZeraStatus restricted_check(const TXType *txn, const zera_txn::TRANSACTION_TYPE &txn_type);

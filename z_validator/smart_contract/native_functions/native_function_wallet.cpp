@@ -15,6 +15,7 @@
 #include "hashing.h"
 #include "utils.h"
 #include "wallet.pb.h"
+#include "nf_helpers.h"
 
 WasmEdge_Result DeriveWalletCurrent(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                 const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -24,22 +25,14 @@ WasmEdge_Result DeriveWalletCurrent(void *Data, const WasmEdge_CallingFrameConte
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> SeedKey(SeedSize);
-
   SenderDataType* sender = (SenderDataType *)Data;
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, SeedKey.data(), SeedPointer, SeedSize);
   std::string seed;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, SeedPointer, SeedSize, seed))
   {
-    std::string SeedKey_temp(reinterpret_cast<char *>(SeedKey.data()), SeedSize);
-    seed = SeedKey_temp;
-  }
-  else
-  {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
 
   auto seed_vec = Hashing::sha256_hash(seed);
@@ -102,34 +95,25 @@ WasmEdge_Result DeriveWalletDelegate(void *Data, const WasmEdge_CallingFrameCont
   uint32_t InstanceSize = WasmEdge_ValueGetI32(In[5]);
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-  std::vector<unsigned char> SeedKey(SeedSize);
-  std::vector<unsigned char> ContractKey(ContractSize);
-  std::vector<unsigned char> InstanceKey(InstanceSize);
-
   SenderDataType* sender = (SenderDataType *)Data;
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, SeedKey.data(), SeedPointer, SeedSize);
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-  WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, InstanceKey.data(), InstancePointer, InstanceSize);
-
-  if (!WasmEdge_ResultOK(Res))
+  std::string seed;
+  if (!read_wasm_param(MemCxt, SeedPointer, SeedSize, seed))
   {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
-  if (!WasmEdge_ResultOK(Res2))
+  std::string contract_name;
+  if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_name))
   {
-    return Res2;
+    return WasmEdge_Result_Terminate;
   }
-  if (!WasmEdge_ResultOK(Res3))
+  std::string instance_temp;
+  if (!read_wasm_param(MemCxt, InstancePointer, InstanceSize, instance_temp))
   {
-    return Res3;
+    return WasmEdge_Result_Terminate;
   }
-
-  std::string seed(reinterpret_cast<char *>(SeedKey.data()), SeedSize);
-  std::string contract_name(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-  std::string instance_temp(reinterpret_cast<char *>(InstanceKey.data()), InstanceSize);
 
   std::string contract_key = contract_name + "_" + instance_temp;
   // Validate that delegate wallet is in the call chain
@@ -148,7 +132,7 @@ WasmEdge_Result DeriveWalletDelegate(void *Data, const WasmEdge_CallingFrameCont
   if (contract_instance == "")
   {
     // Delegate wallet not found in call chain - no access
-    logging::print("[DeriveWalletDelegate] Delegate wallet not found in call chain", true);
+    logging::print("[DeriveWalletDelegate] FAILED: Delegate wallet not found in call chain", true);
     return WasmEdge_Result_Terminate;
   }
 
@@ -183,11 +167,9 @@ WasmEdge_Result DeriveWalletDelegate(void *Data, const WasmEdge_CallingFrameCont
   }
   else
   {
-    (*wallets_map)[base58_wallet] = true;
     logging::print("[DeriveWalletDelegate] Added new derived wallet: " + base58_wallet, true);
+    sender->derived_wallets[base58_wallet] = derived_wallets_key;
     
-    // Store updated derived wallets back to database
-    db_smart_contract_states::store_single(derived_wallets_key, derived_wallets.SerializeAsString());
   }
 
   const char *val = base58_wallet.c_str();
@@ -206,19 +188,14 @@ WasmEdge_Result DeriveWallet(void *Data, const WasmEdge_CallingFrameContext *Cal
 
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
 
-  std::vector<unsigned char> SeedKey(SeedSize);
-
   SenderDataType* sender = (SenderDataType *)Data;
-
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, SeedKey.data(), SeedPointer, SeedSize);
   std::string seed;
-  if (WasmEdge_ResultOK(Res))
+  if (!read_wasm_param(MemCxt, SeedPointer, SeedSize, seed))
   {
-    std::string SeedKey_temp(reinterpret_cast<char *>(SeedKey.data()), SeedSize);
-    seed = SeedKey_temp;
+    return WasmEdge_Result_Terminate;
   }
 
   auto seed_vec = Hashing::sha256_hash(seed);

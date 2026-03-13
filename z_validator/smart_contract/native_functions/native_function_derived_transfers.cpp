@@ -140,13 +140,6 @@ namespace
         auth->add_public_key()->set_smart_contract_auth(sc_auth);
     }
 
-    void delegate_set_auth(zera_txn::TransferAuthentication *auth, SenderDataType &sender, const std::string &sc_auth, const std::string &delegate_wallet)
-    {
-        auth->add_nonce(sender.sc_nonce);
-        sender.sc_nonce++;
-
-        auth->add_public_key()->set_smart_contract_auth(sc_auth);
-    }
 
     void set_input(zera_txn::InputTransfers *input, const std::string &amount)
     {
@@ -170,7 +163,7 @@ namespace
         zera_txn::TXNS block_txns;
         block_txns.ParseFromString(value);
 
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -270,7 +263,7 @@ namespace
 
     // Create transfer using derived wallet with delegate (for DelegateSend variant)
     std::string derived_delegate_create_transfer(SenderDataType &sender, const std::string &contract_id, const std::string &amount,
-                                                 const std::string &wallet, const std::string &delegate_wallet,
+                                                 const std::string &wallet, std::string &sc_auth,
                                                  const std::string &derived_wallet_raw, bool transfer_all_zra = false)
     {
         uint256_t contract_fee_amount = 0;
@@ -280,14 +273,13 @@ namespace
         zera_txn::CoinTXN txn;
         zera_txn::BaseTXN *base = txn.mutable_base();
 
-        std::string sc_auth;
 
-        if(!delegate_set_base(base, sender, delegate_wallet, sc_auth))
+        if(!delegate_set_base_from_auth(base, sender, sc_auth))
         {
-            return "FAILED: Delegate wallet not found";
+            return "FAILED: Smart contract instance not found";
         }
 
-        delegate_set_auth(txn.mutable_auth(), sender, sc_auth, delegate_wallet);
+        set_auth(txn.mutable_auth(), sender, derived_wallet_raw);
         set_output(txn.add_output_transfers(), amount, wallet);
         txn.set_contract_id(contract_id);
 
@@ -332,8 +324,8 @@ namespace
             return "FAILED: Current smart contract instance not found";
         }
 
-        std::string delegate_wallet = sender.current_smart_contract_instance;
-        delegate_set_auth(txn.mutable_auth(), sender, sc_auth, delegate_wallet);
+        std::string delegate_wallet = sender.current_smart_contract_instance_name;
+        set_auth(txn.mutable_auth(), sender, derived_wallet_raw);
         set_output(txn.add_output_transfers(), amount, wallet);
         txn.set_contract_id(contract_id);
 
@@ -394,85 +386,48 @@ WasmEdge_Result DerivedSend(void *Data, const WasmEdge_CallingFrameContext *Call
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get contract ID
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get amount
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[DerivedSend] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
+        return WasmEdge_Result_Terminate;
     }
-    else
+
+    if (!is_valid_uint256(amount))
     {
-        return Res2;
+        logging::print("[DerivedSend] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Get destination wallet
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res3;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get derived wallet
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-    }
-    else
-    {
-        return Res4;
+        return WasmEdge_Result_Terminate;
     }
 
     // Verify derived wallet ownership
     std::string instance_key = "derived_wallets<>" + sender->smart_contract_instance;
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by this contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedSend] FAILED: Derived wallet not owned by this contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -519,132 +474,95 @@ WasmEdge_Result DerivedDelegateSend(void *Data, const WasmEdge_CallingFrameConte
     uint32_t WalletPointer = WasmEdge_ValueGetI32(In[4]);
     uint32_t WalletSize = WasmEdge_ValueGetI32(In[5]);
 
-    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[6]);
-    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[7]);
+    uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[6]);
+    uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[7]);
 
-    uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[8]);
-    uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[9]);
+    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[8]);
+    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[9]);
 
     uint32_t InstancePointer = WasmEdge_ValueGetI32(In[10]);
     uint32_t InstanceSize = WasmEdge_ValueGetI32(In[11]);
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[12]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DelegateKey(DelegateSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-    std::vector<unsigned char> InstanceKey(InstanceSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get contract ID
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[DerivedDelegateSend] Contract ID: ", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[DerivedDelegateSend] Contract ID: ", contract_id, true);
 
     // Get amount
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
-
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[DerivedDelegateSend] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-        logging::print("[DerivedDelegateSend] Amount: ", amount, true);
-    }
-    else
-    {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
 
-    // Get destination wallet
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!is_valid_uint256(amount))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-        logging::print("[DerivedDelegateSend] Wallet: ", wallet, true);
-    }
-    else
-    {
-        return Res3;
-    }
-
-    // Get delegate wallet
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateKey.data(), DelegatePointer, DelegateSize);
-    std::string delegate_wallet;
-    if (WasmEdge_ResultOK(Res4))
-    {
-        std::string wallet_temp(reinterpret_cast<char *>(DelegateKey.data()), DelegateSize);
-        delegate_wallet = wallet_temp;
-        logging::print("[DerivedDelegateSend] Delegate Wallet: ", delegate_wallet, true);
-    }
-    else
-    {
-        return Res4;
-    }
-
-    // Get derived wallet
-    WasmEdge_Result Res5 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
-    std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res5))
-    {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedDelegateSend] Derived Wallet: ", derived_wallet_base58, true);
-    }
-    else
-    {
-        return Res5;
-    }
-
-    // Get contract instance name
-    WasmEdge_Result Res6 = WasmEdge_MemoryInstanceGetData(MemCxt, InstanceKey.data(), InstancePointer, InstanceSize);
-    std::string instance_name;
-    if (WasmEdge_ResultOK(Res6))
-    {
-        std::string instance_temp(reinterpret_cast<char *>(InstanceKey.data()), InstanceSize);
-        instance_name = instance_temp;
-        logging::print("[DerivedDelegateSend] Instance: ", instance_name, true);
-    }
-    else
-    {
-        return Res6;
-    }
-
-    // Build the instance key for verification
-    std::string instance_key = "derived_wallets<>" + instance_name;
-
-    // Verify derived wallet ownership
-    if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
-    {
-        std::string result = "FAILED: Derived wallet not owned by specified contract";
+        std::string result = "[DerivedDelegateSend] FAILED: Invalid uint256";
         const char *val = result.c_str();
         const size_t len = result.length();
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[DerivedDelegateSend] FAILED: Invalid uint256", true);
         return WasmEdge_Result_Fail;
+    }
+    logging::print("[DerivedDelegateSend] Amount: ", amount, true);
+
+    // Get destination wallet
+    std::string wallet;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSend] Wallet: ", wallet, true);
+
+    // Get delegate wallet
+    std::string sc_name;
+    if (!read_wasm_param(MemCxt, DelegatePointer, DelegateSize, sc_name))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSend] SC Name: ", sc_name, true);
+
+    // Get derived wallet
+    std::string derived_wallet_base58;
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSend] Derived Wallet: ", derived_wallet_base58, true);
+
+    // Get contract instance name
+    std::string instance;
+    if (!read_wasm_param(MemCxt, InstancePointer, InstanceSize, instance))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSend] Instance: ", instance, true);
+
+
+
+    std::string sc_auth = sc_name + "_" + instance;
+
+    if (!in_call_chain(sc_auth, *sender))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+
+    // Build the instance key for verification
+    std::string instance_key = "derived_wallets<>" + sc_auth;
+
+    // Verify derived wallet ownership
+    if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
+    {
+        logging::print("[DerivedDelegateSend] FAILED: Derived wallet not owned by specified contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -659,13 +577,16 @@ WasmEdge_Result DerivedDelegateSend(void *Data, const WasmEdge_CallingFrameConte
     }
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
 
-    std::vector<uint8_t> delegate_wallet_decode = base58_decode(delegate_wallet);
-    std::string delegate_string(delegate_wallet_decode.begin(), delegate_wallet_decode.end());
 
     std::vector<uint8_t> derived_wallet_decode = base58_decode(derived_wallet_base58);
     std::string derived_wallet_raw(derived_wallet_decode.begin(), derived_wallet_decode.end());
 
-    std::string status = derived_delegate_create_transfer(*sender, contract_id, amount, wallet_string, delegate_string, derived_wallet_raw);
+    
+    std::string status = "OK";
+    if(amount != "0")
+    {
+        status = derived_delegate_create_transfer(*sender, contract_id, amount, wallet_string, sc_auth, derived_wallet_raw);
+    }
 
     logging::print("[DerivedDelegateSend] Status: ", status, true);
 
@@ -700,78 +621,50 @@ WasmEdge_Result DerivedCurrentSend(void *Data, const WasmEdge_CallingFrameContex
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get contract ID
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[DerivedCurrentSend] Contract ID: ", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[DerivedCurrentSend] Contract ID: ", contract_id, true);
 
     // Get amount
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-        amount = amount_temp;
+        return WasmEdge_Result_Terminate;
+    }
 
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[DerivedCurrentSend] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-        logging::print("[DerivedCurrentSend] Amount: ", amount, true);
-    }
-    else
+    if (!is_valid_uint256(amount))
     {
-        return Res2;
+        std::string result = "[DerivedCurrentSend] FAILED: Invalid uint256";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[DerivedCurrentSend] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Fail;
     }
+    logging::print("[DerivedCurrentSend] Amount: ", amount, true);
 
     // Get destination wallet
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-        logging::print("[DerivedCurrentSend] Wallet: ", wallet, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[DerivedCurrentSend] Wallet: ", wallet, true);
 
     // Get derived wallet
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedCurrentSend] Derived Wallet: ", derived_wallet_base58, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res4;
-    }
+    logging::print("[DerivedCurrentSend] Derived Wallet: ", derived_wallet_base58, true);
 
     // Get current smart contract instance
     size_t call_size = sender->call_chain.size();
@@ -782,12 +675,8 @@ WasmEdge_Result DerivedCurrentSend(void *Data, const WasmEdge_CallingFrameContex
     std::string instance_key = "derived_wallets<>" + current_instance;
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by current contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedCurrentSend] FAILED: Derived wallet not owned by current contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -805,7 +694,12 @@ WasmEdge_Result DerivedCurrentSend(void *Data, const WasmEdge_CallingFrameContex
     std::vector<uint8_t> derived_wallet_decode = base58_decode(derived_wallet_base58);
     std::string derived_wallet_raw(derived_wallet_decode.begin(), derived_wallet_decode.end());
 
-    std::string status = derived_current_create_transfer(*sender, contract_id, amount, wallet_string, derived_wallet_raw);
+
+    std::string status = "OK";
+    if(amount != "0")
+    {
+        status = derived_current_create_transfer(*sender, contract_id, amount, wallet_string, derived_wallet_raw);
+    }
 
     logging::print("[DerivedCurrentSend] Status: ", status, true);
 
@@ -834,48 +728,29 @@ WasmEdge_Result DerivedSendAll(void *Data, const WasmEdge_CallingFrameContext *C
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get destination wallet
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get derived wallet
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedSendAll] Derived Wallet: ", derived_wallet_base58, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    logging::print("[DerivedSendAll] Derived Wallet: ", derived_wallet_base58, true);
 
     // Verify derived wallet ownership
     std::string instance_key = "derived_wallets<>" + sender->smart_contract_instance;
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by this contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedSendAll] FAILED: Derived wallet not owned by this contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -917,6 +792,7 @@ WasmEdge_Result DerivedSendAll(void *Data, const WasmEdge_CallingFrameContext *C
 
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[DerivedSendAll] FAILED: Did not parse token lookup", true);
 
         return WasmEdge_Result_Fail;
     }
@@ -971,84 +847,68 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
     uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[4]);
     uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[5]);
 
-    uint32_t InstancePointer = WasmEdge_ValueGetI32(In[6]);
-    uint32_t InstanceSize = WasmEdge_ValueGetI32(In[7]);
+    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[6]);
+    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[7]);
 
-    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
+    uint32_t InstancePointer = WasmEdge_ValueGetI32(In[8]);
+    uint32_t InstanceSize = WasmEdge_ValueGetI32(In[9]);
 
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DelegateWalletKey(DelegateWalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-    std::vector<unsigned char> InstanceKey(InstanceSize);
+    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[10]);
 
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get destination wallet
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get delegate wallet
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, DelegateWalletKey.data(), DelegateWalletPointer, DelegateWalletSize);
     std::string delegate_wallet;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, DelegateWalletPointer, DelegateWalletSize, delegate_wallet))
     {
-        std::string delegate_wallet_temp(reinterpret_cast<char *>(DelegateWalletKey.data()), DelegateWalletSize);
-        delegate_wallet = delegate_wallet_temp;
-    }
-    else
-    {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get derived wallet
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedDelegateSendAll] Derived Wallet: ", derived_wallet_base58, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res3;
-    }
+    logging::print("[DerivedDelegateSendAll] Derived Wallet: ", derived_wallet_base58, true);
 
     // Get contract instance name
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, InstanceKey.data(), InstancePointer, InstanceSize);
-    std::string instance_name;
-    if (WasmEdge_ResultOK(Res4))
+    std::string instance;
+    if (!read_wasm_param(MemCxt, InstancePointer, InstanceSize, instance))
     {
-        std::string instance_temp(reinterpret_cast<char *>(InstanceKey.data()), InstanceSize);
-        instance_name = instance_temp;
-        logging::print("[DerivedDelegateSendAll] Instance: ", instance_name, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
+    logging::print("[DerivedDelegateSendAll] Instance: ", instance, true);
+
+    std::string sc_name;
+    if (!read_wasm_param(MemCxt, DelegatePointer, DelegateSize, sc_name))
     {
-        return Res4;
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSendAll] SC Name: ", sc_name, true);
+
+    std::string sc_auth = sc_name + "_" + instance;
+
+    if (!in_call_chain(sc_auth, *sender))
+    {
+        return WasmEdge_Result_Fail;
     }
 
     // Build the instance key for verification
-    std::string instance_key = "derived_wallets<>" + instance_name;
+    std::string instance_key = "derived_wallets<>" + sc_auth;
 
     // Verify derived wallet ownership
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by specified contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedDelegateSendAll] FAILED: Derived wallet not owned by specified contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -1062,9 +922,6 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
         wallet_decode = base58_decode(wallet);
     }
     std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
-
-    std::vector<uint8_t> delegate_wallet_decode = base58_decode(delegate_wallet);
-    std::string delegate_wallet_string(delegate_wallet_decode.begin(), delegate_wallet_decode.end());
 
     std::vector<uint8_t> derived_wallet_decode = base58_decode(derived_wallet_base58);
     std::string derived_wallet_raw(derived_wallet_decode.begin(), derived_wallet_decode.end());
@@ -1093,7 +950,7 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
 
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
-
+        logging::print("[DerivedDelegateSendAll] FAILED: Did not parse token lookup", true);
         return WasmEdge_Result_Fail;
     }
 
@@ -1108,7 +965,7 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
         std::string amount;
         if (db_wallets::get_single(derived_wallet_raw + token, amount))
         {
-            std::string status = derived_delegate_create_transfer(*sender, token, amount, wallet_string, delegate_wallet_string, derived_wallet_raw);
+            std::string status = derived_delegate_create_transfer(*sender, token, amount, wallet_string, sc_name, derived_wallet_raw);
             transfer_message += token + std::string(": ") + status + std::string(", ");
         }
     }
@@ -1117,7 +974,7 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
 
     if (db_processed_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount) || db_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount))
     {
-        std::string status = derived_delegate_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, delegate_wallet_string, derived_wallet_raw, true);
+        std::string status = derived_delegate_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, sc_name, derived_wallet_raw, true);
         transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
     }
 
@@ -1146,37 +1003,22 @@ WasmEdge_Result DerivedCurrentSendAll(void *Data, const WasmEdge_CallingFrameCon
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get destination wallet
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
     std::string wallet;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
     {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-        wallet = wallet_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
     // Get derived wallet
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedCurrentSendAll] Derived Wallet: ", derived_wallet_base58, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res2;
-    }
+    logging::print("[DerivedCurrentSendAll] Derived Wallet: ", derived_wallet_base58, true);
 
     // Get current smart contract instance
     size_t call_size = sender->call_chain.size();
@@ -1187,12 +1029,8 @@ WasmEdge_Result DerivedCurrentSendAll(void *Data, const WasmEdge_CallingFrameCon
     std::string instance_key = "derived_wallets<>" + current_instance;
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by current contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedCurrentSendAll] FAILED: Derived wallet not owned by current contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     // Decode wallets
@@ -1234,7 +1072,7 @@ WasmEdge_Result DerivedCurrentSendAll(void *Data, const WasmEdge_CallingFrameCon
 
         WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
         Out[0] = WasmEdge_ValueGenI32(len);
-
+        logging::print("[DerivedCurrentSendAll] FAILED: Did not parse token lookup", true);
         return WasmEdge_Result_Fail;
     }
 

@@ -71,6 +71,8 @@ WasmEdge_Result DerivedSend(void *Data, const WasmEdge_CallingFrameContext *Call
                                 const WasmEdge_Value *In, WasmEdge_Value *Out);
 WasmEdge_Result DerivedSendMulti(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                  const WasmEdge_Value *In, WasmEdge_Value *Out);
+WasmEdge_Result DerivedDelegateSendMulti(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                         const WasmEdge_Value *In, WasmEdge_Value *Out);
 WasmEdge_Result DerivedDelegateSend(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                     const WasmEdge_Value *In, WasmEdge_Value *Out);
 WasmEdge_Result DerivedCurrentSend(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,

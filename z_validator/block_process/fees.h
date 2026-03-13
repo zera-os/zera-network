@@ -49,9 +49,9 @@ class zera_fees
     static bool get_cur_equiv_validator(const std::string &contract_id, uint256_t &cur_equiv);
 
     template <typename TXType>
-    static ZeraStatus process_simple_fees(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address = "", const bool &sc_txn = false);
+    static ZeraStatus process_simple_fees(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address = "", const bool &sc_txn = false, const std::string &sc_fee_address = "");
 
     template <typename TXType>
-    static ZeraStatus process_simple_fees_gas(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, uint256_t &fee_amount, const std::string &fee_address = "", const bool &sc_txn = false);
+    static ZeraStatus process_simple_fees_gas(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, uint256_t &fee_amount, const std::string &fee_address = "", const bool &sc_txn = false, const std::string &sc_fee_address = "");
 
 };

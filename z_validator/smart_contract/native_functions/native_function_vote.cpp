@@ -23,7 +23,7 @@ namespace
         block_txns.ParseFromString(value);
 
         std::string fee_address = sender.fee_address;
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::VOTE_TYPE, false, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::VOTE_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -66,47 +66,24 @@ WasmEdge_Result Vote(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[6]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> ProposalKey(ProposalSize);
-    std::vector<unsigned char> OptionKey(OptionSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, ProposalKey.data(), ProposalPointer, ProposalSize);
     std::string proposal_id;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, ProposalPointer, ProposalSize, proposal_id))
     {
-        std::string prop_temp(reinterpret_cast<char *>(ProposalKey.data()), ProposalSize);
-        proposal_id = prop_temp;
-    }
-    else
-    {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, OptionKey.data(), OptionPointer, OptionSize);
     std::string option;
-    if (WasmEdge_ResultOK(Res3))
+    if (!read_wasm_param(MemCxt, OptionPointer, OptionSize, option))
     {
-        std::string option_temp(reinterpret_cast<char *>(OptionKey.data()), OptionSize);
-        option = option_temp;
-    }
-    else
-    {
-        return Res3;
+        return WasmEdge_Result_Terminate;
     }
 
     zera_txn::GovernanceVote txn;
@@ -124,6 +101,7 @@ WasmEdge_Result Vote(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
             // Check if the value is within the range of uint32_t
             if (numeric_option > std::numeric_limits<uint32_t>::max())
             {
+                logging::print("[Vote] Numeric option out of range: " + option, true);
                 return WasmEdge_Result_Terminate; // Fail if the value is out of range
             }
 
@@ -131,11 +109,13 @@ WasmEdge_Result Vote(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
         }
         catch (const std::exception &e)
         {
+            logging::print("[Vote] Numeric option conversion error: " + option, true);
             return WasmEdge_Result_Terminate; // Fail if conversion throws an exception
         }
     }
     else
     {
+        logging::print("[Vote] Invalid option: " + option, true);
         return WasmEdge_Result_Terminate; // Fail the native function if the option is invalid
     }
 

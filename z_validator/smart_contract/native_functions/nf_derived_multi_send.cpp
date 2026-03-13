@@ -172,7 +172,7 @@ namespace
         zera_txn::TXNS block_txns;
         block_txns.ParseFromString(value);
 
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
         if (status.ok())
         {
             sender.txn_hashes.push_back(txn.base().hash());
@@ -181,6 +181,41 @@ namespace
         }
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());
         return zera_txn::TXN_STATUS_Name(status.txn_status());
+    }
+
+    std::string create_transfer_delegate(SenderDataType &sender, const std::string &contract_id, std::string input_amount, const std::vector<std::string> &amounts, const std::vector<std::string> &wallets, std::string &sc_auth, const std::string &derived_wallet_raw)
+    {
+        if (amounts.size() != wallets.size())
+        {
+            return "FAILED: Amounts and wallets must be the same size";
+        }
+
+        uint256_t contract_fee_amount = 0;
+        uint256_t txn_fee_amount = 0;
+
+        zera_txn::CoinTXN txn;
+
+        for (int i = 0; i < amounts.size(); i++)
+        {
+            set_output(txn.add_output_transfers(), amounts[i], wallets[i]);
+        }
+
+        zera_txn::BaseTXN *base = txn.mutable_base();
+        delegate_set_base_from_auth(base, sender, sc_auth);
+        set_auth(txn.mutable_auth(), sender, derived_wallet_raw);
+        txn.set_contract_id(contract_id);
+
+        if (!calc_contract_fee(input_amount, &txn, contract_fee_amount))
+        {
+            return "FAILED: Did not calculate contract fee";
+        }
+
+        set_input(txn.add_input_transfers(), input_amount);
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
+        auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
+        std::string hash(hash_vec.begin(), hash_vec.end());
+        base->set_hash(hash);
+        return process_txn(sender, txn);
     }
 
     std::string create_transfer(SenderDataType &sender, const std::string &contract_id, std::string input_amount, const std::vector<std::string> &amounts, const std::vector<std::string> &wallets, const std::string &derived_wallet_raw)
@@ -282,156 +317,108 @@ WasmEdge_Result DerivedSendMulti(void *Data, const WasmEdge_CallingFrameContext 
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[10]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> InputAmountKey(InputAmountSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-    std::vector<unsigned char> WalletKey(WalletSize);
-    std::vector<unsigned char> DerivedWalletKey(DerivedWalletSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-        logging::print("[DerivedSendMulti] Contract ID: ", contract_id, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res;
-    }
+    logging::print("[DerivedSendMulti] Contract ID: ", contract_id, true);
 
-    WasmEdge_Result Res1 = WasmEdge_MemoryInstanceGetData(MemCxt, InputAmountKey.data(), InputAmountPointer, InputAmountSize);
     std::string input_amount;
-    if (WasmEdge_ResultOK(Res1))
+    if (!read_wasm_param(MemCxt, InputAmountPointer, InputAmountSize, input_amount))
     {
-        std::string input_amount_temp(reinterpret_cast<char *>(InputAmountKey.data()), InputAmountSize);
-        input_amount = input_amount_temp;
+        return WasmEdge_Result_Terminate;
+    }
+    if (!is_valid_uint256(input_amount))
+    {
+        std::string result = "[DerivedSendMulti] FAILED: Invalid uint256";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[DerivedSendMulti] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Fail;
+    }
+    logging::print("[DerivedSendMulti] Input Amount: ", input_amount, true);
 
-        if (!is_valid_uint256(input_amount_temp))
+    std::string amount_temp;
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    std::vector<std::string> amounts;
+    uint256_t total_amount = 0;
+    std::stringstream ss(amount_temp);
+    std::string amount;
+    while (std::getline(ss, amount, ','))
+    {
+        amounts.push_back(amount);
+    }
+    for (int i = 0; i < amounts.size(); i++)
+    {
+        if (!is_valid_uint256(amounts[i]))
         {
             std::string result = "[DerivedSendMulti] FAILED: Invalid uint256";
             const char *val = result.c_str();
             const size_t len = result.length();
             WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
             Out[0] = WasmEdge_ValueGenI32(len);
+            logging::print("[DerivedSendMulti] FAILED: Invalid uint256", true);
             return WasmEdge_Result_Fail;
         }
-        logging::print("[DerivedSendMulti] Input Amount: ", input_amount, true);
+        total_amount += uint256_t(amounts[i]);
+        logging::print("[DerivedSendMulti] Amount: ", amounts[i], true);
     }
-    else
+
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
     {
-        return Res1;
+        return WasmEdge_Result_Terminate;
     }
-
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
-    std::vector<std::string> amounts;
-    uint256_t total_amount = 0;
-
-    if (WasmEdge_ResultOK(Res2))
+    std::vector<std::string> wallet_list;
+    std::stringstream ss2(wallet_temp);
+    std::string wallet;
+    while (std::getline(ss2, wallet, ','))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-
-        // split by comma and push into vector
-        std::stringstream ss(amount_temp);
-        std::string amount;
-        while (std::getline(ss, amount, ','))
-        {
-            amounts.push_back(amount);
-        }
-
-        for (int i = 0; i < amounts.size(); i++)
-        {
-            if (!is_valid_uint256(amounts[i]))
-            {
-                std::string result = "[DerivedSendMulti] FAILED: Invalid uint256";
-                const char *val = result.c_str();
-                const size_t len = result.length();
-                WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-                Out[0] = WasmEdge_ValueGenI32(len);
-                return WasmEdge_Result_Fail;
-            }
-
-            total_amount += uint256_t(amounts[i]);
-            logging::print("[DerivedSendMulti] Amount: ", amounts[i], true);
-        }
-    }
-    else
-    {
-        return Res2;
+        wallet_list.push_back(wallet);
+        logging::print("[DerivedSendMulti] Wallet: ", wallet, true);
     }
 
-    WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, WalletKey.data(), WalletPointer, WalletSize);
-    std::vector<std::string> wallets;
-    if (WasmEdge_ResultOK(Res3))
-    {
-        std::string wallet_temp(reinterpret_cast<char *>(WalletKey.data()), WalletSize);
-
-        // split by comma and push into vector
-        std::stringstream ss(wallet_temp);
-        std::string wallet;
-        while (std::getline(ss, wallet, ','))
-        {
-            wallets.push_back(wallet);
-            logging::print("[DerivedSendMulti] Wallet: ", wallet, true);
-        }
-    }
-    else
-    {
-        return Res3;
-    }
-
-    // Get derived wallet
-    WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, DerivedWalletKey.data(), DerivedWalletPointer, DerivedWalletSize);
     std::string derived_wallet_base58;
-    if (WasmEdge_ResultOK(Res4))
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
     {
-        std::string derived_wallet_temp(reinterpret_cast<char *>(DerivedWalletKey.data()), DerivedWalletSize);
-        derived_wallet_base58 = derived_wallet_temp;
-        logging::print("[DerivedSendMulti] Derived Wallet: ", derived_wallet_base58, true);
+        return WasmEdge_Result_Terminate;
     }
-    else
-    {
-        return Res4;
-    }
+    logging::print("[DerivedSendMulti] Derived Wallet: ", derived_wallet_base58, true);
 
     // Verify derived wallet ownership
     std::string instance_key = "derived_wallets<>" + sender->smart_contract_instance;
     if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
     {
-        std::string result = "FAILED: Derived wallet not owned by this contract";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedSendMulti] FAILED: Derived wallet not owned by this contract", true);
+        return WasmEdge_Result_Terminate;
     }
 
     if (total_amount != uint256_t(input_amount))
     {
-        std::string result = "[DerivedSendMulti] FAILED: Total amount does not match input amount";
-        const char *val = result.c_str();
-        const size_t len = result.length();
-        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-        Out[0] = WasmEdge_ValueGenI32(len);
-        return WasmEdge_Result_Fail;
+        logging::print("[DerivedSendMulti] FAILED: Total amount does not match input amount", true);
+        return WasmEdge_Result_Terminate;
     }
 
     std::vector<std::string> decoded_wallets;
 
-    for (int i = 0; i < wallets.size(); i++)
+    for (int i = 0; i < wallet_list.size(); i++)
     {
         std::vector<uint8_t> wallet_decode;
-        if (wallets[i] == ":fire:")
+        if (wallet_list[i] == ":fire:")
         {
-            wallet_decode.assign(wallets[i].begin(), wallets[i].end());
+            wallet_decode.assign(wallet_list[i].begin(), wallet_list[i].end());
         }
         else
         {
-            wallet_decode = base58_decode(wallets[i]);
+            wallet_decode = base58_decode(wallet_list[i]);
         }
         std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
         decoded_wallets.push_back(wallet_string);
@@ -439,6 +426,186 @@ WasmEdge_Result DerivedSendMulti(void *Data, const WasmEdge_CallingFrameContext 
     std::vector<uint8_t> derived_wallet_decode = base58_decode(derived_wallet_base58);
     std::string derived_wallet_raw(derived_wallet_decode.begin(), derived_wallet_decode.end());
     std::string status = create_transfer(*sender, contract_id, input_amount, amounts, decoded_wallets, derived_wallet_raw);
+
+    std::string result = status;
+    const char *val = result.c_str();
+    const size_t len = result.length();
+
+    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+    Out[0] = WasmEdge_ValueGenI32(len);
+    return WasmEdge_Result_Success;
+}
+
+//*************************************************************
+//                  DerivedDelegateSendMulti
+// Send from a derived wallet (delegate contract context)
+//*************************************************************
+WasmEdge_Result DerivedDelegateSendMulti(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+    /*
+     * Params: {i32, i32, i32, i32, i32, i32, i32}
+     * Returns: {i32}
+     */
+    SenderDataType *sender = (SenderDataType *)Data;
+
+    uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
+    uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
+
+    uint32_t InputAmountPointer = WasmEdge_ValueGetI32(In[2]);
+    uint32_t InputAmountSize = WasmEdge_ValueGetI32(In[3]);
+
+    uint32_t AmountPointer = WasmEdge_ValueGetI32(In[4]);
+    uint32_t AmountSize = WasmEdge_ValueGetI32(In[5]);
+
+    uint32_t WalletPointer = WasmEdge_ValueGetI32(In[6]);
+    uint32_t WalletSize = WasmEdge_ValueGetI32(In[7]);
+
+    uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[8]);
+    uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[9]);
+
+    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[10]);
+    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[11]);
+
+    uint32_t InstancePointer = WasmEdge_ValueGetI32(In[12]);
+    uint32_t InstanceSize = WasmEdge_ValueGetI32(In[13]);
+
+    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[14]);
+
+    WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+
+    std::string contract_id;
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSendMulti] Contract ID: ", contract_id, true);
+
+    std::string input_amount;
+    if (!read_wasm_param(MemCxt, InputAmountPointer, InputAmountSize, input_amount))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    if (!is_valid_uint256(input_amount))
+    {
+        std::string result = "[DerivedDelegateSendMulti] FAILED: Invalid uint256";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[DerivedDelegateSendMulti] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Fail;
+    }
+    logging::print("[DerivedDelegateSendMulti] Input Amount: ", input_amount, true);
+
+    std::string amount_temp;
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    std::vector<std::string> amounts;
+    uint256_t total_amount = 0;
+    std::stringstream ss(amount_temp);
+    std::string amount;
+    while (std::getline(ss, amount, ','))
+    {
+        amounts.push_back(amount);
+    }
+    for (int i = 0; i < amounts.size(); i++)
+    {
+        if (!is_valid_uint256(amounts[i]))
+        {
+            std::string result = "[DerivedDelegateSendMulti] FAILED: Invalid uint256";
+            const char *val = result.c_str();
+            const size_t len = result.length();
+            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+            Out[0] = WasmEdge_ValueGenI32(len);
+            logging::print("[DerivedDelegateSendMulti] FAILED: Invalid uint256", true);
+            return WasmEdge_Result_Fail;
+        }
+        total_amount += uint256_t(amounts[i]);
+        logging::print("[DerivedDelegateSendMulti] Amount: ", amounts[i], true);
+    }
+
+    std::string wallet_temp;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet_temp))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    std::vector<std::string> wallet_list;
+    std::stringstream ss2(wallet_temp);
+    std::string wallet;
+    while (std::getline(ss2, wallet, ','))
+    {
+        wallet_list.push_back(wallet);
+        logging::print("[DerivedDelegateSendMulti] Wallet: ", wallet, true);
+    }
+
+    std::string derived_wallet_base58;
+    if (!read_wasm_param(MemCxt, DerivedWalletPointer, DerivedWalletSize, derived_wallet_base58))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSendMulti] Derived Wallet: ", derived_wallet_base58, true);
+
+    std::string instance_name;
+    if (!read_wasm_param(MemCxt, InstancePointer, InstanceSize, instance_name))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSendMulti] Instance: ", instance_name, true);
+
+    if (!in_call_chain(instance_name, *sender))
+    {
+        return WasmEdge_Result_Fail;
+    }
+
+    std::string delegate_name;
+    if (!read_wasm_param(MemCxt, DelegatePointer, DelegateSize, delegate_name))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+    logging::print("[DerivedDelegateSendMulti] Delegate: ", delegate_name, true);
+
+    std::string sc_auth = instance_name + "_" + delegate_name;
+
+    if (!in_call_chain(sc_auth, *sender))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+
+    // Verify derived wallet ownership
+    std::string instance_key = "derived_wallets<>" + sc_auth;
+    if (!verify_derived_wallet_ownership(derived_wallet_base58, instance_key, *sender))
+    {
+        logging::print("[DerivedDelegateSendMulti] FAILED: Derived wallet not owned by this contract", true);
+        return WasmEdge_Result_Terminate;
+    }
+
+    if (total_amount != uint256_t(input_amount))
+    {
+        logging::print("[DerivedDelegateSendMulti] FAILED: Total amount does not match input amount", true);
+        return WasmEdge_Result_Terminate;
+    }
+
+    std::vector<std::string> decoded_wallets;
+
+    for (int i = 0; i < wallet_list.size(); i++)
+    {
+        std::vector<uint8_t> wallet_decode;
+        if (wallet_list[i] == ":fire:")
+        {
+            wallet_decode.assign(wallet_list[i].begin(), wallet_list[i].end());
+        }
+        else
+        {
+            wallet_decode = base58_decode(wallet_list[i]);
+        }
+        std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
+        decoded_wallets.push_back(wallet_string);
+    }
+    std::vector<uint8_t> derived_wallet_decode = base58_decode(derived_wallet_base58);
+    std::string derived_wallet_raw(derived_wallet_decode.begin(), derived_wallet_decode.end());
+    std::string status = create_transfer_delegate(*sender, contract_id, input_amount, amounts, decoded_wallets, sc_auth, derived_wallet_raw);
 
     std::string result = status;
     const char *val = result.c_str();

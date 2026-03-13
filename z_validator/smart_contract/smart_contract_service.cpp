@@ -12,6 +12,7 @@
 #include "native_function_get_ace.h"
 #include "native_function_utils.h"
 #include "native_function_txns.h"
+#include "native_txns.h"
 #include "db_base.h"
 #include "base58.h"
 
@@ -22,9 +23,10 @@
 #include "fees.h"
 #include "nf_helpers.h"
 
+
 using namespace std;
 
-const int exit_error_code = 1;
+const int exit_error_code = -1;
 const int exit_success_code = 0;
 
 SenderDataType sender;
@@ -147,7 +149,8 @@ int allocate(WasmEdge_VMContext *VMCxt, int length)
 
   if (WasmEdge_ResultOK(Res))
   {
-    return WasmEdge_ValueGetI32(R[0]);
+    int ptr = WasmEdge_ValueGetI32(R[0]);
+    return ptr;
   }
   else
   {
@@ -180,9 +183,14 @@ int deallocate(WasmEdge_VMContext *VMCxt, int pointer, int size)
 // https://stackoverflow.com/questions/27687769/use-different-parameter-data-types-in-same-function-c
 std::vector<int> settle(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryInstanceContext *MemoryCxt, std::string input)
 {
-  const char *cInput = input.c_str();
-
   int length_of_input = input.length();
+
+  if (length_of_input == 0)
+  {
+    return {0, 0};
+  }
+
+  const char *cInput = input.c_str();
   int pointer = allocate(VMCxt, length_of_input);
 
   WasmEdge_MemoryInstanceSetData(MemoryCxt, (unsigned char *)cInput, pointer, length_of_input);
@@ -381,6 +389,11 @@ int parse_and_store_inputs(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryInstanceCon
         throw std::runtime_error("Error: unhandled func_params type\n");
       }
 
+      if (sr[0] == exit_error_code)
+      {
+        throw std::runtime_error("[settle] allocate failed for parameter\n");
+      }
+
       int pointer = sr[0];
       //
       unsigned char *ucPointerLittleEndian = reinterpret_cast<unsigned char *>(&pointer);
@@ -455,12 +468,17 @@ std::vector<std::any> wasmInstantiateAndExecute(WasmEdge_VMContext *VMCxt, const
   //  * Step 4: Execute WASM functions. You can execute functions repeatedly
   //  * after instantiation.
   //  */
-  logging::print("[Execute function]:", function_name, true);
   WasmEdge_Value P[2], rets[1];
   FuncName = WasmEdge_StringCreateByCString(function_name);
   P[0] = WasmEdge_ValueGenI32(inputs_count > 0 ? pointer_of_pointers : 0); // params_pointer: *mut u32
   P[1] = WasmEdge_ValueGenI32(inputs_count);                               // params_count: i32
+  
   Res = WasmEdge_VMExecute(VMCxt, FuncName, P, 2, rets, 1);
+
+  if (!WasmEdge_ResultOK(Res)) {
+      logging::print("[Execute function] Error code: " + std::to_string(Res.Code), true);
+      logging::print("[Execute function] Error: " + std::string(WasmEdge_ResultGetMessage(Res)), true);
+  }
 
   if (WasmEdge_ResultOK(Res))
   {
@@ -469,10 +487,17 @@ std::vector<std::any> wasmInstantiateAndExecute(WasmEdge_VMContext *VMCxt, const
   else
   {
     std::string error_message = WasmEdge_ResultGetMessage(Res);
+    logging::print("[Execute function] Error:", error_message, true);
 
     if (error_message == "cost limit exceeded")
     {
       logging::print("[Execute function] Error:", error_message);
+      throw std::runtime_error("[Execute function] Error\n");
+    }
+    else if(error_message == "unreachable")
+    {
+      logging::print("[Execute function] Error:", error_message);
+      sender.panic = true;
       throw std::runtime_error("[Execute function] Error\n");
     }
 
@@ -494,6 +519,7 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
 
   if (sender.current_depth >= sender.max_depth)
   {
+    logging::print("[Call] Current depth exceeded max depth", true);
     return WasmEdge_Result_Fail;
   }
   /*
@@ -503,56 +529,53 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
 
   uint32_t ContractNamePointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ContractNameLength = WasmEdge_ValueGetI32(In[1]);
-  //
   uint32_t InstancePointer = WasmEdge_ValueGetI32(In[2]);
   uint32_t InstanceLength = WasmEdge_ValueGetI32(In[3]);
-  //
   uint32_t FunctionNamePointer = WasmEdge_ValueGetI32(In[4]);
   uint32_t FunctionNameLength = WasmEdge_ValueGetI32(In[5]);
-  //
   uint32_t ParametersPointer = WasmEdge_ValueGetI32(In[6]);
   uint32_t ParametersLength = WasmEdge_ValueGetI32(In[7]);
-
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-  unsigned char ContractName[ContractNameLength + 1];
-  unsigned char Instance[InstanceLength + 1];
-  unsigned char FunctionName[FunctionNameLength + 1];
-  unsigned char Parameters[ParametersLength];
+  static constexpr uint32_t MAX_NAME_LEN = 4096;
+  static constexpr uint32_t MAX_PARAM_LEN = 65536;
+
+  if (ContractNameLength > MAX_NAME_LEN || InstanceLength > MAX_NAME_LEN ||
+      FunctionNameLength > MAX_NAME_LEN || ParametersLength > MAX_PARAM_LEN)
+  {
+    logging::print("[Call] Rejected: length exceeds safe maximum", true);
+    return WasmEdge_Result_Fail;
+  }
+
+  std::vector<unsigned char> ContractName(ContractNameLength + 1);
+  std::vector<unsigned char> Instance(InstanceLength + 1);
+  std::vector<unsigned char> FunctionName(FunctionNameLength + 1);
+  std::vector<unsigned char> Parameters(ParametersLength > 0 ? ParametersLength : 1);
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-  // read data
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractName, ContractNamePointer, ContractNameLength);
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, Instance, InstancePointer, InstanceLength);
-  WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, FunctionName, FunctionNamePointer, FunctionNameLength);
-  WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, Parameters, ParametersPointer, ParametersLength);
 
-  ContractName[ContractNameLength] = '\0'; // Ensure it's null-terminated
-  FunctionName[FunctionNameLength] = '\0'; // Ensure it's null-terminated
+  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractName.data(), ContractNamePointer, ContractNameLength);
+  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, Instance.data(), InstancePointer, InstanceLength);
+  WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, FunctionName.data(), FunctionNamePointer, FunctionNameLength);
+  WasmEdge_Result Res4 = ParametersLength > 0
+    ? WasmEdge_MemoryInstanceGetData(MemCxt, Parameters.data(), ParametersPointer, ParametersLength)
+    : WasmEdge_Result_Success;
+
+  ContractName[ContractNameLength] = '\0';
+  FunctionName[FunctionNameLength] = '\0';
   Instance[InstanceLength] = '\0';
-  // Sometimes, when we pass 'retrieve' as function name, it results in 'retrieve??' here.
-  // In C++, unsigned char FunctionName[8]; defines an array of 8 characters,
-  // but when you use the %s format specifier in printf,
-  // it expects a null-terminated string.
-  // If your FunctionName array is not null-terminated,
-  // printf will continue reading memory beyond the 8 characters,
-  // leading to the inclusion of extra characters (in your case, ??)
-  // until it happens to encounter a null byte (\0).
 
   if (WasmEdge_ResultOK(Res) && WasmEdge_ResultOK(Res2) && WasmEdge_ResultOK(Res3) && WasmEdge_ResultOK(Res4))
   {
-    std::string ContractNameString1((char *)ContractName);
-    std::string InstanceString1((char *)Instance);
-    std::string FunctionNameString((char *)FunctionName);
+    std::string ContractNameString1((char *)ContractName.data());
+    std::string InstanceString1((char *)Instance.data());
+    std::string FunctionNameString((char *)FunctionName.data());
 
     logging::print("[Call] ContractName:", ContractNameString1);
     logging::print("[Call] Instance:", InstanceString1);
     logging::print("[Call] FunctionName:", FunctionNameString);
 
-    // split Parameters string into array of strings
-    //
-    const size_t array_size = sizeof(Parameters) / sizeof(unsigned char);
-    std::string input_string(reinterpret_cast<const char *>(Parameters), array_size);
+    std::string input_string(reinterpret_cast<const char *>(Parameters.data()), ParametersLength);
     std::vector<std::string> parametersVecString = getWords(input_string, "##");
     std::vector<std::any> parametersVec;
 
@@ -564,17 +587,16 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
       }
     }
 
-    // read dependant instance contract
-    //
-    std::string ContractNameString((char *)ContractName);
-    std::string InstanceString((char *)Instance);
+    std::string ContractNameString((char *)ContractName.data());
+    std::string InstanceString((char *)Instance.data());
     std::string instance_name = ContractNameString + "_" + InstanceString;
-    //
+
     std::string raw_data;
     db_smart_contracts::get_single(instance_name, raw_data);
-    //
+
     if (raw_data.empty())
     {
+      logging::print("[Call] No smart contract found:", instance_name, true);
       return WasmEdge_Result_Fail;
     }
     //
@@ -597,8 +619,12 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
     sender.wallet_chain.clear();
     sender.call_chain.push_back(instance_name);
     sender.wallet_chain.push_back(smart_contract_wallet);
-    sender.current_smart_contract_instance = instance_name;
+    sender.current_smart_contract_instance_name = instance_name;
     sender.emited.clear();
+
+    sender.current_function = FunctionNameString;
+    sender.current_smart_contract_instance = InstanceString;
+    sender.current_smart_contract_name = ContractNameString;
 
     // call
     //
@@ -612,16 +638,17 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
       {
         const char *wasmFile = db_contract.language() == zera_txn::LANGUAGE::JAVASCRIPT ? "../smart_contract/wasmedge_quickjs.wasm" : "../smart_contract/python-3.11.3-wasmedge.wasm";
         // wasm_function will be _start
-        results = smart_contract_service::runCallScriptingLang(instance_name, wasmFile, db_contract.binary_code(), (const char *)FunctionName, parametersVec);
+        results = smart_contract_service::runCallScriptingLang(instance_name, wasmFile, db_contract.binary_code(), FunctionNameString, parametersVec);
       }
       else
       {
         // compiled langs
-        results = smart_contract_service::runCall(instance_name, NULL, db_contract.binary_code(), (const char *)FunctionName, parametersVec, 0, NULL, 0, NULL);
+        results = smart_contract_service::runCall(instance_name, NULL, db_contract.binary_code(), FunctionNameString, parametersVec, 0, NULL, 0, NULL);
       }
     }
     catch (std::exception &e)
     {
+      logging::print("[Call] Error:", e.what(), true);
       return WasmEdge_Result_Fail;
     }
 
@@ -642,6 +669,7 @@ WasmEdge_Result Call(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
     sender_copy.gas_used = sender.gas_used;
     sender_copy.gas_available = sender.gas_available;
     sender_copy.current_depth = sender.current_depth;
+    sender_copy.block_emits = sender.block_emits;
 
     sender = sender_copy;
 
@@ -663,6 +691,7 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
                              const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
 
+  logging::print("[DelegateCall] START");
   if (sender.current_depth >= sender.max_depth)
   {
     logging::print("Error: current depth exceeded max depth");
@@ -676,51 +705,49 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
 
   uint32_t ContractNamePointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ContractNameLength = WasmEdge_ValueGetI32(In[1]);
-  //
   uint32_t InstancePointer = WasmEdge_ValueGetI32(In[2]);
   uint32_t InstanceLength = WasmEdge_ValueGetI32(In[3]);
-  //
   uint32_t FunctionNamePointer = WasmEdge_ValueGetI32(In[4]);
   uint32_t FunctionNameLength = WasmEdge_ValueGetI32(In[5]);
-  //
   uint32_t ParametersPointer = WasmEdge_ValueGetI32(In[6]);
   uint32_t ParametersLength = WasmEdge_ValueGetI32(In[7]);
-
   uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
-  unsigned char ContractName[ContractNameLength + 1];
-  unsigned char Instance[InstanceLength + 1];
-  unsigned char FunctionName[FunctionNameLength + 1];
-  unsigned char Parameters[ParametersLength];
+  static constexpr uint32_t MAX_NAME_LEN = 4096;
+  static constexpr uint32_t MAX_PARAM_LEN = 65536;
+
+  if (ContractNameLength > MAX_NAME_LEN || InstanceLength > MAX_NAME_LEN ||
+      FunctionNameLength > MAX_NAME_LEN || ParametersLength > MAX_PARAM_LEN)
+  {
+    logging::print("[DelegateCall] Rejected: length exceeds safe maximum", true);
+    return WasmEdge_Result_Fail;
+  }
+
+  std::vector<unsigned char> ContractName(ContractNameLength + 1);
+  std::vector<unsigned char> Instance(InstanceLength + 1);
+  std::vector<unsigned char> FunctionName(FunctionNameLength + 1);
+  std::vector<unsigned char> Parameters(ParametersLength > 0 ? ParametersLength : 1);
 
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
-  // read data
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractName, ContractNamePointer, ContractNameLength);
-  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, Instance, InstancePointer, InstanceLength);
-  WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, FunctionName, FunctionNamePointer, FunctionNameLength);
-  WasmEdge_Result Res4 = WasmEdge_MemoryInstanceGetData(MemCxt, Parameters, ParametersPointer, ParametersLength);
 
-  ContractName[ContractNameLength] = '\0'; // Ensure it's null-terminated
-  FunctionName[FunctionNameLength] = '\0'; // Ensure it's null-terminated
+  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractName.data(), ContractNamePointer, ContractNameLength);
+  WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, Instance.data(), InstancePointer, InstanceLength);
+  WasmEdge_Result Res3 = WasmEdge_MemoryInstanceGetData(MemCxt, FunctionName.data(), FunctionNamePointer, FunctionNameLength);
+  WasmEdge_Result Res4 = ParametersLength > 0
+    ? WasmEdge_MemoryInstanceGetData(MemCxt, Parameters.data(), ParametersPointer, ParametersLength)
+    : WasmEdge_Result_Success;
+
+  ContractName[ContractNameLength] = '\0';
+  FunctionName[FunctionNameLength] = '\0';
   Instance[InstanceLength] = '\0';
-  // Sometimes, when we pass 'retrieve' as function name, it results in 'retrieve??' here.
-  // In C++, unsigned char FunctionName[8]; defines an array of 8 characters,
-  // but when you use the %s format specifier in printf,
-  // it expects a null-terminated string.
-  // If your FunctionName array is not null-terminated,
-  // printf will continue reading memory beyond the 8 characters,
-  // leading to the inclusion of extra characters (in your case, ??)
-  // until it happens to encounter a null byte (\0).
 
   if (WasmEdge_ResultOK(Res) && WasmEdge_ResultOK(Res2) && WasmEdge_ResultOK(Res3) && WasmEdge_ResultOK(Res4))
   {
-    std::string ContractNameString1((char *)ContractName);
-    std::string InstanceString1((char *)Instance);
-    std::string FunctionNameString((char *)FunctionName);
-    // split Parameters string into array of strings
-    //
-    const size_t array_size = sizeof(Parameters) / sizeof(unsigned char);
-    std::string input_string(reinterpret_cast<const char *>(Parameters), array_size);
+    std::string ContractNameString1((char *)ContractName.data());
+    std::string InstanceString1((char *)Instance.data());
+    std::string FunctionNameString((char *)FunctionName.data());
+
+    std::string input_string(reinterpret_cast<const char *>(Parameters.data()), ParametersLength);
 
     std::vector<std::string> parametersVecString = getWords(input_string, "##");
     std::vector<std::any> parametersVec;
@@ -734,12 +761,11 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
       }
     }
 
-    // read dependant instance contract
-    //
-    std::string ContractNameString((char *)ContractName);
-    std::string InstanceString((char *)Instance);
+    std::string ContractNameString((char *)ContractName.data());
+    std::string InstanceString((char *)Instance.data());
     std::string instance_name = ContractNameString + "_" + InstanceString;
-    logging::print("instance_name:", instance_name, true);
+    logging::print("[DelegateCall] instance_name:", instance_name, true);
+    logging::print("[DelegateCall] function name:", FunctionNameString, true);
     //
     std::string raw_data;
     db_smart_contracts::get_single(instance_name, raw_data);
@@ -756,10 +782,18 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
     zera_txn::PublicKey smart_contract_pub_key;
     smart_contract_pub_key.set_smart_contract_auth("sc_" + instance_name);
     std::string smart_contract_wallet = wallets::generate_wallet(smart_contract_pub_key);
+    std::string old_smart_contract_instance_name = sender.current_smart_contract_instance_name;
+
+    std::string old_function = sender.current_function;
     std::string old_smart_contract_instance = sender.current_smart_contract_instance;
+    std::string old_smart_contract_name = sender.current_smart_contract_name;
+
     sender.call_chain.push_back(instance_name);
     sender.wallet_chain.push_back(smart_contract_wallet);
-    sender.current_smart_contract_instance = instance_name;
+    sender.current_smart_contract_instance_name = instance_name;
+    sender.current_function = FunctionNameString;
+    sender.current_smart_contract_instance = InstanceString;
+    sender.current_smart_contract_name = ContractNameString;
     std::vector<std::string> sender_copy_emited;
 
     sender_copy_emited = sender.emited;
@@ -777,11 +811,10 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
       {
         const char *wasmFile = db_contract.language() == zera_txn::LANGUAGE::JAVASCRIPT ? "../smart_contract/wasmedge_quickjs.wasm" : "../smart_contract/python-3.11.3-wasmedge.wasm";
         // wasm_function will be _start
-        results = smart_contract_service::runCallScriptingLang(instance_name, wasmFile, db_contract.binary_code(), (const char *)FunctionName, parametersVec);
+        results = smart_contract_service::runCallScriptingLang(instance_name, wasmFile, db_contract.binary_code(), FunctionNameString, parametersVec);
       }
       else
       {
-        // compiled langs
         results = smart_contract_service::runCall(instance_name, NULL, db_contract.binary_code(), FunctionNameString, parametersVec, 0, NULL, 0, NULL);
       }
     }
@@ -804,11 +837,15 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
     {
       resultsString += "[res]" + emit + "[end]";
     }
+
     sender.emited = sender_copy_emited;
 
     sender.call_chain.pop_back();
     sender.wallet_chain.pop_back();
+    sender.current_smart_contract_instance_name = old_smart_contract_instance_name;
+    sender.current_function = old_function;
     sender.current_smart_contract_instance = old_smart_contract_instance;
+    sender.current_smart_contract_name = old_smart_contract_name;
 
     const char *val = resultsString.c_str();
     const size_t len = resultsString.length();
@@ -826,46 +863,79 @@ WasmEdge_Result DelegateCall(void *, const WasmEdge_CallingFrameContext *CallFra
 WasmEdge_Result Emit(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                      const WasmEdge_Value *In, WasmEdge_Value *Out)
 {
-  /*
-   * Params: {i32, i32}
-   */
-
   uint32_t ValuePointer = WasmEdge_ValueGetI32(In[0]);
   uint32_t ValueSize = WasmEdge_ValueGetI32(In[1]);
 
-  std::vector<unsigned char> Value(ValueSize);
-
-  // https://wasmedge.org/docs/embed/c/host_function/#calling-frame-context
-  // https://www.secondstate.io/articles/extend-webassembly/
   WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-  // read data
-  WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, Value.data(), ValuePointer, ValueSize);
-  if (WasmEdge_ResultOK(Res))
+  std::string valueString;
+  if (!read_wasm_param(MemCxt, ValuePointer, ValueSize, valueString))
   {
-    std::string valueString(reinterpret_cast<char *>(Value.data()), ValueSize);
+    return WasmEdge_Result_Terminate;
+  }
 
-    uint64_t storage_fee = ValueSize;
+  uint64_t storage_fee = ValueSize;
 
-    if (!storage_fees(sender, storage_fee))
-    {
-      logging::print("[Emit] no storage fees Value: ", valueString, true);
-      int value = 0;
-      Out[0] = WasmEdge_ValueGenI32(value);
-      return WasmEdge_Result_Success;
-    }
-
-    logging::print("[Emit] Value: ", valueString, true);
-    // emit
-    sender.emited.push_back(valueString);
-    int value = 1;
-    Out[0] = WasmEdge_ValueGenI32(value);
+  if (!storage_fees(sender, storage_fee))
+  {
+    logging::print("[Emit] no storage fees Value: ", valueString, true);
+    Out[0] = WasmEdge_ValueGenI32(0);
     return WasmEdge_Result_Success;
   }
-  else
+
+  logging::print("[Emit] Value: ", valueString, true);
+  sender.emited.push_back(valueString);
+  Out[0] = WasmEdge_ValueGenI32(1);
+  return WasmEdge_Result_Success;
+}
+
+WasmEdge_Result EmitBlock(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                          const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+  uint32_t ValuePointer = WasmEdge_ValueGetI32(In[0]);
+  uint32_t ValueSize = WasmEdge_ValueGetI32(In[1]);
+
+  WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+
+  std::string valueString;
+  if (!read_wasm_param(MemCxt, ValuePointer, ValueSize, valueString))
   {
-    return Res;
+    return WasmEdge_Result_Terminate;
   }
+
+  uint64_t storage_fee = ValueSize;
+
+  if (!storage_fees(sender, storage_fee))
+  {
+    logging::print("[EmitBlock] no storage fees Value: ", valueString, true);
+    Out[0] = WasmEdge_ValueGenI32(0);
+    return WasmEdge_Result_Success;
+  }
+
+  logging::print("[EmitBlock] Value: ", valueString, true);
+  sender.emited.push_back(valueString);
+  if (sender.current_smart_contract_instance_name != sender.original_smart_contract_instance_name)
+  {
+    std::string block_emit_key = sender.current_smart_contract_instance_name + "<>" + std::to_string(sender.current_depth);
+
+    if(sender.block_emits.find(block_emit_key) != sender.block_emits.end())
+    {
+      sender.block_emits[block_emit_key].emits.push_back(valueString);
+    }
+    else
+    {
+      BlockEmitType block_emit;
+      block_emit.depth = sender.current_depth;
+      block_emit.smart_contract_name = sender.current_smart_contract_name;
+      block_emit.smart_contract_instance = sender.current_smart_contract_instance;
+      block_emit.function = sender.current_function;
+      block_emit.emits.push_back(valueString);
+      sender.block_emits[block_emit_key] = block_emit;
+    }
+  }
+
+  Out[0] = WasmEdge_ValueGenI32(1);
+  return WasmEdge_Result_Success;
 }
 
 WasmEdge_Result Version(void *, const WasmEdge_CallingFrameContext *CallFrameCxt,
@@ -1216,6 +1286,13 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_Emit, sizeof(ReturnList_Emit) / sizeof(ReturnList_Emit[0]),
                      Emit, "emit");
 
+  enum WasmEdge_ValType ParamList_EmitBlock[2] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_EmitBlock[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_EmitBlock, sizeof(ParamList_EmitBlock) / sizeof(ParamList_EmitBlock[0]),
+                     ReturnList_EmitBlock, sizeof(ReturnList_EmitBlock) / sizeof(ReturnList_EmitBlock[0]),
+                     EmitBlock, "emit_block");
+
   enum WasmEdge_ValType ParamList_Compliance[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_Compliance[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
@@ -1417,9 +1494,10 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_DerivedSendAll, sizeof(ReturnList_DerivedSendAll) / sizeof(ReturnList_DerivedSendAll[0]),
                      DerivedSendAll, "derived_send_all");
 
-  enum WasmEdge_ValType ParamList_DerivedDelegateSendAll[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+  enum WasmEdge_ValType ParamList_DerivedDelegateSendAll[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
                                                                WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
-                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_DerivedDelegateSendAll[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
                      ParamList_DerivedDelegateSendAll, sizeof(ParamList_DerivedDelegateSendAll) / sizeof(ParamList_DerivedDelegateSendAll[0]),
@@ -1468,6 +1546,17 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_DerivedSendMulti, sizeof(ParamList_DerivedSendMulti) / sizeof(ParamList_DerivedSendMulti[0]),
                      ReturnList_DerivedSendMulti, sizeof(ReturnList_DerivedSendMulti) / sizeof(ReturnList_DerivedSendMulti[0]),
                      DerivedSendMulti, "derived_send_multi");
+  
+  enum WasmEdge_ValType ParamList_DerivedDelegateSendMulti[15] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedDelegateSendMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedDelegateSendMulti, sizeof(ParamList_DerivedDelegateSendMulti) / sizeof(ParamList_DerivedDelegateSendMulti[0]),
+                     ReturnList_DerivedDelegateSendMulti, sizeof(ReturnList_DerivedDelegateSendMulti) / sizeof(ReturnList_DerivedDelegateSendMulti[0]),
+                     DerivedDelegateSendMulti, "derived_delegate_send_multi");
 
   enum WasmEdge_ValType ParamList_GetAllStates[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_GetAllStates[1] = {WasmEdge_ValType_I32};
@@ -1475,6 +1564,13 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_GetAllStates, sizeof(ParamList_GetAllStates) / sizeof(ParamList_GetAllStates[0]),
                      ReturnList_GetAllStates, sizeof(ReturnList_GetAllStates) / sizeof(ReturnList_GetAllStates[0]),
                      GetAllStates, "get_all_states");
+
+  enum WasmEdge_ValType ParamList_SubmitTXN[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_SubmitTXN[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_SubmitTXN, sizeof(ParamList_SubmitTXN) / sizeof(ParamList_SubmitTXN[0]),
+                     ReturnList_SubmitTXN, sizeof(ReturnList_SubmitTXN) / sizeof(ReturnList_SubmitTXN[0]),
+                     SubmitTXN, "submit_txn");
 
   return HostModCxt;
 }
@@ -1484,7 +1580,15 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
 
   int stats_size = sender.Stats.size() - 1;
   uint64_t gas_used = WasmEdge_StatisticsGetTotalCost(sender.Stats[stats_size]);
-  sender.gas_available -= gas_used;
+
+  if(gas_used > sender.gas_available)
+  {
+    sender.gas_available = 0;
+  }
+  else 
+  {
+    sender.gas_available -= gas_used;
+  }
 
   // Create store context
   WasmEdge_ConfigureContext *ConfCxt = WasmEdge_ConfigureCreate();
@@ -1522,6 +1626,11 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
   /* Register the module instance into the store. */
 
   Res = WasmEdge_VMRegisterModuleFromImport(VMCxt, HostModCxt);
+  if (!WasmEdge_ResultOK(Res))
+  {
+    logging::print("[runCall] Host module registration failed:", WasmEdge_ResultGetMessage(Res), true);
+    throw std::runtime_error("Error: Host module registration failed");
+  }
 
   /* Step 1: Load WASM file. */
   if (wasmFileLocation)
@@ -1544,6 +1653,7 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
    */
   if (!WasmEdge_ResultOK(Res))
   {
+    logging::print("[runCall] Loading phase failed:", WasmEdge_ResultGetMessage(Res), true);
     throw std::runtime_error("Error: Loading phase failed");
   }
 
@@ -1565,7 +1675,14 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
   catch (...)
   {
     gas_used = WasmEdge_StatisticsGetTotalCost(StatCxt);
-    sender.gas_available -= gas_used;
+    if(gas_used > sender.gas_available)
+    {
+      sender.gas_available = 0;
+    }
+    else 
+    {
+      sender.gas_available -= gas_used;
+    }
     sender.Stats.pop_back();
     stats_size = sender.Stats.size() - 1;
     WasmEdge_StatisticsSetCostLimit(sender.Stats[stats_size], sender.gas_available);
@@ -1577,7 +1694,16 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
   }
 
   gas_used = WasmEdge_StatisticsGetTotalCost(StatCxt);
-  sender.gas_available -= gas_used;
+
+  if(gas_used > sender.gas_available)
+  {
+    sender.gas_available = 0;
+  }
+  else 
+  {
+    sender.gas_available -= gas_used;
+  }
+
   sender.Stats.pop_back();
   stats_size = sender.Stats.size() - 1;
 
@@ -1593,7 +1719,7 @@ std::vector<std::any> smart_contract_service::runCall(std::string smart_contract
   return results;
 }
 
-std::vector<std::any> smart_contract_service::run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string func, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t &limit, uint64_t &used_gas, std::vector<std::string> &txn_hashes)
+std::vector<std::any> smart_contract_service::run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string func, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t &limit, uint64_t &used_gas, std::vector<std::string> &txn_hashes, bool &panic)
 {
   const char *function_name = func.c_str();
   logging::print("[run] function_name:", func);
@@ -1619,21 +1745,15 @@ std::vector<std::any> smart_contract_service::run(std::string smart_contract_ins
   // Create VM context
   sender.VMCxt = WasmEdge_VMCreate(ConfCxt, StoreCxt);
   WasmEdge_StatisticsContext *StatCxt = WasmEdge_VMGetStatisticsContext(sender.VMCxt);
-
   WasmEdge_StatisticsSetCostLimit(StatCxt, limit);
-
   sender.Stats.push_back(StatCxt);
-
   /* Result.*/
   WasmEdge_Result Res;
   // Add host module
   //
-
   WasmEdge_ModuleInstanceContext *HostModCxt = CreateExternModule();
-
   // 4. Register Host Modules to WasmEdge
   /* Register the module instance into the store. */
-
   Res = WasmEdge_VMRegisterModuleFromImport(sender.VMCxt, HostModCxt);
   //
   if (!WasmEdge_ResultOK(Res))
@@ -1671,15 +1791,18 @@ std::vector<std::any> smart_contract_service::run(std::string smart_contract_ins
     logging::print("Error: Validation phase failed:", WasmEdge_ResultGetMessage(Res));
     throw std::runtime_error("Error: Validation phase failed");
   }
-
   WasmEdge_String FuncName;
   std::vector<std::any> results;
+
   try
   {
     results = wasmInstantiateAndExecute(sender.VMCxt, function_name, func_params, Res, FuncName);
   }
-  catch (...)
+  catch (std::exception &e)
   {
+    logging::print("[run] EXCEPTION:", e.what(), true);
+    logging::print("[run] WasmEdge Result:", WasmEdge_ResultGetMessage(Res), true);
+
     for (auto hash : sender.txn_hashes)
     {
       txn_hashes.push_back(hash);
@@ -1689,6 +1812,7 @@ std::vector<std::any> smart_contract_service::run(std::string smart_contract_ins
     used_gas = TotalCosts + sender.gas_used;
     logging::print("[run] Panic TotalCost (GasCosts):", std::to_string(TotalCosts), true);
     logging::print("[run] Panic TotalCosts + sender.gas_used:", std::to_string(used_gas), true);
+    panic = sender.panic;
     throw std::runtime_error("Error: wasmInstantiateAndExecute");
   }
 
@@ -1707,7 +1831,7 @@ std::vector<std::any> smart_contract_service::run(std::string smart_contract_ins
   return results;
 }
 
-std::vector<std::any> smart_contract_service::runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t &limit, uint64_t &used_gas, std::vector<std::string> &txn_hashes)
+std::vector<std::any> smart_contract_service::runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t &limit, uint64_t &used_gas, std::vector<std::string> &txn_hashes, bool &panic)
 {
   const char *Preopens[] = {
       ".:.",
@@ -1715,7 +1839,7 @@ std::vector<std::any> smart_contract_service::runScriptingLang(std::string smart
       "usr/local/lib/python3.11:usr/local/lib/python3.11"};
   const char *argv[] = {"", binary_code.c_str()};
 
-  return smart_contract_service::run(smart_contract_instance, wasmFile, binary_code, wasm_function, func_params, 2, Preopens, 2, argv, limit, used_gas, txn_hashes);
+  return smart_contract_service::run(smart_contract_instance, wasmFile, binary_code, wasm_function, func_params, 2, Preopens, 2, argv, limit, used_gas, txn_hashes, panic);
 }
 
 std::vector<std::any> smart_contract_service::runCallScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params)
@@ -1747,15 +1871,16 @@ std::vector<std::any> smart_contract_service::eval(
     uint64_t &used_gas,
     std::vector<std::string> &txn_hashes,
     std::map<std::string, std::string> &derived_wallets,
-    const bool &sc_fees,
-    const std::string &fee_id
+    const std::string &fee_id,
+    std::map<std::string, BlockEmitType> &block_emits,
+    bool &panic
   )
 {
   // store sender's data
   sender.pub_key = sender_pub_key;
   sender.wallet_address = sender_wallet_address;
   sender.smart_contract_instance = smart_contract_instance;
-  sender.current_smart_contract_instance = smart_contract_instance;
+  sender.current_smart_contract_instance_name = smart_contract_instance;
   sender.fee_smart_contract_instance = smart_contract_instance;
   sender.txn_hash = txn_hash;
   sender.timestamp = timestamp;
@@ -1763,19 +1888,14 @@ std::vector<std::any> smart_contract_service::eval(
   sender.fee_address = fee_address;
   sender.smart_contract_wallet = smart_contract_wallet;
   sender.fee_id = fee_id;
-
-  if (sc_fees)
-  {
-    sender.fee_smart_contract_wallet = smart_contract_wallet;
-  }
-  else
-  {
-    sender.fee_smart_contract_wallet = sender_wallet_address;
-  }
-
-  sender.max_depth = 50;
+  sender.original_smart_contract_instance_name = smart_contract_instance;
+  sender.current_function = func;
+  sender.fee_smart_contract_wallet = sender_wallet_address;
+  
+  sender.max_depth = 100;
   sender.current_depth = 0;
   sender.emited.clear();
+  sender.block_emits.clear();
   sender.call_chain.clear();
   sender.wallet_chain.clear();
   sender.call_chain.push_back(smart_contract_instance);
@@ -1784,6 +1904,7 @@ std::vector<std::any> smart_contract_service::eval(
   sender.gas_used = 0;
   sender.txn_hashes.clear();
   sender.derived_wallets.clear();
+  sender.panic = false;
 
   zera_validator::BlockHeader block_header;
   std::string key;
@@ -1801,12 +1922,12 @@ std::vector<std::any> smart_contract_service::eval(
   {
     const char *wasmFile = language == zera_txn::LANGUAGE::JAVASCRIPT ? "../smart_contract/wasmedge_quickjs.wasm" : "../smart_contract/python-3.11.3-wasmedge.wasm";
     // wasm_function will be _start
-    results = smart_contract_service::runScriptingLang(smart_contract_instance, wasmFile, binary_code, func, func_params, gas_limit, used_gas, txn_hashes);
+    results = smart_contract_service::runScriptingLang(smart_contract_instance, wasmFile, binary_code, func, func_params, gas_limit, used_gas, txn_hashes, panic);
   }
   else
   {
     // compiled langs
-    results = smart_contract_service::run(smart_contract_instance, NULL, binary_code, func, func_params, 0, NULL, 0, NULL, gas_limit, used_gas, txn_hashes);
+    results = smart_contract_service::run(smart_contract_instance, NULL, binary_code, func, func_params, 0, NULL, 0, NULL, gas_limit, used_gas, txn_hashes, panic);
   }
 
   logging::print("[eval] results:", std::to_string(results.size()));
@@ -1815,6 +1936,10 @@ std::vector<std::any> smart_contract_service::eval(
   {
     results.insert(results.begin(), sender.emited[i]);
   }
+
+  logging::print("[eval] block_emits contracts:", std::to_string(sender.block_emits.size()));
+
+  block_emits = sender.block_emits;
 
   logging::print("[eval] txn_hashes size:", std::to_string(txn_hashes.size()), true);
 
