@@ -178,9 +178,16 @@ namespace
 
         if (status.ok())
         {
-            sender.txn_hashes.push_back(txn.base().hash());
-            block_txns.add_coin_txns()->CopyFrom(txn);
-            txn_hash_tracker::add_sc_hash(txn.base().hash());
+            if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+            {
+                sender.txn_hashes.push_back(txn.base().hash());
+                block_txns.add_coin_txns()->CopyFrom(txn);
+                txn_hash_tracker::add_sc_hash(txn.base().hash());
+            }
+            else
+            {
+                balance_tracker::remove_txn_balance(txn.base().hash());
+            }
         }
 
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());

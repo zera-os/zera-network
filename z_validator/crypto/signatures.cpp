@@ -72,20 +72,38 @@ namespace
         std::vector<uint8_t> pub_key_extract;
         KeyType key_type = extract_public_key(key_pair.public_key, pub_key_extract);
         std::vector<uint8_t> private_key = key_pair.private_key;
-        std::vector<uint8_t> signature; // Create a vector to hold the signature
+        std::vector<uint8_t> signature;
 
-        if (key_type == KeyType::ED25519) // If the key type is Ed25519
+        if (key_type == KeyType::ED25519)
         {
-            // Use the sodium crypto_sign_detached function to sign the message
-            signature = std::vector<uint8_t>(crypto_sign_BYTES); // Allocate space for the signature
-            if (crypto_sign_detached(signature.data(), nullptr, message.data(), message.size(), private_key.data()) != 0)
+            std::vector<uint8_t> signing_key;
+
+            if (private_key.size() == crypto_sign_SEEDBYTES)
             {
-                // If the signature generation fails, throw an error
-                std::string sig_str(signature.begin(), signature.end());
-                return sig_str;
+                // 32-byte seed: derive the full 64-byte secret key
+                std::vector<uint8_t> derived_pk(crypto_sign_PUBLICKEYBYTES);
+                signing_key.resize(crypto_sign_SECRETKEYBYTES);
+                if (crypto_sign_seed_keypair(derived_pk.data(), signing_key.data(), private_key.data()) != 0)
+                {
+                    throw std::runtime_error("Failed to derive keypair from seed");
+                }
+            }
+            else if (private_key.size() == crypto_sign_SECRETKEYBYTES)
+            {
+                // 64-byte combined key: use directly
+                signing_key = private_key;
+            }
+            else
+            {
+                throw std::runtime_error("Invalid Ed25519 private key size: expected 32 or 64 bytes");
+            }
+
+            signature = std::vector<uint8_t>(crypto_sign_BYTES);
+            if (crypto_sign_detached(signature.data(), nullptr, message.data(), message.size(), signing_key.data()) != 0)
+            {
+                throw std::runtime_error("Failed to sign message");
             }
             std::string sig_str(signature.begin(), signature.end());
-            // Return the signature
             return sig_str;
         }
         else if (key_type == KeyType::ERROR_TYPE) // If the key type is not recognized or is not Ed448
@@ -845,7 +863,7 @@ void signatures::sign_smart_contract_event(zera_api::SmartContractEventsResponse
     event->set_signature(signature);
 }
 
-bool signatures::verify_message(const std::string& message, const std::string& signature, const std::string& public_key)
+bool signatures::verify_message(const std::string &message, const std::string &signature, const std::string &public_key)
 {
     auto public_key_vec = base58_decode_public_key(public_key);
     auto signature_vec = base58_decode(signature);
@@ -869,14 +887,14 @@ void signatures::sign_response(zera_api::SmartContractEventsSearchResponse *resp
     response->set_signature(signature);
 }
 
-bool signatures::verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest& request)
+bool signatures::verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest &request)
 {
     zera_validator::CheckpointInfoRequest request_copy;
     request_copy.CopyFrom(request);
 
     std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
-    std::string* signature_str = request_copy.release_signature();
+    std::string *signature_str = request_copy.release_signature();
     std::string message_str = request_copy.SerializeAsString();
     std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
@@ -884,14 +902,14 @@ bool signatures::verify_checkpoint_info_request(const zera_validator::Checkpoint
     return verify_signature(message, signature, public_key);
 }
 
-bool signatures::verify_checkpoint_request(const zera_validator::CheckpointRequest& request)
+bool signatures::verify_checkpoint_request(const zera_validator::CheckpointRequest &request)
 {
     zera_validator::CheckpointRequest request_copy;
     request_copy.CopyFrom(request);
 
     std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
-    std::string* signature_str = request_copy.release_signature();
+    std::string *signature_str = request_copy.release_signature();
     std::string message_str = request_copy.SerializeAsString();
     std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());

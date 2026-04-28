@@ -501,15 +501,12 @@ namespace
         {
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_proposal.cpp: check_txn: GovernanceProposal cannot have both governance_txn and options.", zera_txn::TXN_STATUS::INVALID_PARAMETERS);
         }
-
         if (txn->governance_option_txns_size() > 0 && txn->options_size() > 0)
         {
             return check_option_txns(txn);
         }
-
         if (txn->governance_txn_size() > 0)
         {
-
             ZeraStatus status;
             auto gov_txns = txn->governance_txn();
 
@@ -526,8 +523,9 @@ namespace
                 }
             }
 
-            return ZeraStatus();
         }
+
+        return ZeraStatus();
     }
 
     ZeraStatus calculate_fee(const zera_txn::InstrumentContract &contract, const zera_txn::GovernanceProposal *txn, uint256_t &fee_amount)
@@ -712,7 +710,6 @@ ZeraStatus block_process::process_txn<zera_txn::GovernanceProposal>(const zera_t
     {
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.read_status());
     }
-
     status = check_parameters_prop(txn, contract, timed, status_fees);
     status_fees.set_status(status.txn_status());
 

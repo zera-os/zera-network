@@ -1,4 +1,5 @@
 #include "native_function_get_ace.h"
+#include "native_function_txns.h"
 #include "smart_contract_service.h"
 #include "db_base.h"
 #include "hashing.h"
@@ -10,6 +11,7 @@
 #include "utils.h"
 #include "smart_contract_sender_data.h"
 #include "fees.h"
+#include "const.h"
 #include "nf_helpers.h"
 
 //*************************************************************
@@ -173,14 +175,20 @@ namespace
         zera_txn::TXNS block_txns;
         block_txns.ParseFromString(value);
 
-        // ZeraStatus unpack_process_wrapper(TXType *txn, zera_txn::TXNS *block_txns, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed = false, const std::string &fee_address = "", bool sc_txn = false)
         ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, sender.fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
-            sender.txn_hashes.push_back(txn.base().hash());
-            block_txns.add_coin_txns()->CopyFrom(txn);
-            txn_hash_tracker::add_sc_hash(txn.base().hash());
+            if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+            {
+                sender.txn_hashes.push_back(txn.base().hash());
+                block_txns.add_coin_txns()->CopyFrom(txn);
+                txn_hash_tracker::add_sc_hash(txn.base().hash());
+            }
+            else
+            {
+                balance_tracker::remove_txn_balance(txn.base().hash());
+            }
         }
 
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());
@@ -188,26 +196,36 @@ namespace
         return zera_txn::TXN_STATUS_Name(status.txn_status());
     }
 
-    std::string create_transfer(SenderDataType &sender, const std::string &contract_id, const std::string &amount, const std::string &wallet)
+    std::string create_transfer(SenderDataType &sender, const std::string &contract_id, const std::string &amount, const std::string &wallet, bool transfer_all_zra = false)
     {
+        uint256_t contract_fee_amount = 0;
+        uint256_t txn_fee_amount = 0;
+        uint256_t amount_int(amount);
+
         zera_txn::CoinTXN txn;
 
         zera_txn::BaseTXN *base = txn.mutable_base();
 
         set_base(base, sender);
         set_auth(txn.mutable_auth(), sender);
-        set_input(txn.add_input_transfers(), amount);
         set_output(txn.add_output_transfers(), amount, wallet);
 
         if (!calc_contract_fee(amount, &txn))
         {
             return "FAILED: Did not calculate contract fee";
         }
-        uint256_t txn_fee_amount;
+
         calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
 
-        txn.set_contract_id(contract_id);
+        if (transfer_all_zra)
+        {
+            amount_int = amount_int - txn_fee_amount;
+            amount_int = amount_int - contract_fee_amount;
+        }
 
+        set_input(txn.add_input_transfers(), amount_int.str());
+
+        txn.set_contract_id(contract_id);
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -278,6 +296,109 @@ WasmEdge_Result Transfer(void *Data, const WasmEdge_CallingFrameContext *CallFra
 
     const char *val = status.c_str();
     const size_t len = status.length();
+
+    WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+    Out[0] = WasmEdge_ValueGenI32(len);
+    return WasmEdge_Result_Success;
+}
+
+WasmEdge_Result TransferAll(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt, const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+    SenderDataType *sender = (SenderDataType *)Data;
+
+    uint32_t WalletPointer = WasmEdge_ValueGetI32(In[0]);
+    uint32_t WalletSize = WasmEdge_ValueGetI32(In[1]);
+
+    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
+
+    WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+
+    std::string wallet;
+    if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
+    {
+        return WasmEdge_Result_Terminate;
+    }
+
+    std::vector<uint8_t> wallet_decode;
+    if (wallet == ":fire:")
+    {
+        wallet_decode.assign(wallet.begin(), wallet.end());
+    }
+    else
+    {
+        wallet_decode = base58_decode(wallet);
+    }
+
+    std::string wallet_string(wallet_decode.begin(), wallet_decode.end());
+
+    std::string wallet_lookup = "TOKEN_LOOKUP_" + sender->wallet_address;
+    std::string lookup_data;
+    if (!db_wallet_lookup::get_single(wallet_lookup, lookup_data))
+    {
+        std::string result = "No tokens found for wallet";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        return WasmEdge_Result_Success;
+    }
+
+    zera_validator::TokenLookup token_lookup;
+
+    if (!token_lookup.ParseFromString(lookup_data))
+    {
+        std::string result = "FAILED: Did not parse token lookup";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[TransferAll] FAILED: Did not parse token lookup", true);
+        return WasmEdge_Result_Fail;
+    }
+
+    std::string transfer_message = "[Transfer All] ";
+    for (auto token : token_lookup.tokens())
+    {
+        if (token == NETWORK_CONTRACT)
+        {
+            continue;
+        }
+
+        std::string amount;
+        if (db_wallets::get_single(sender->wallet_address + token, amount))
+        {
+            if(amount != "0")
+            {
+                std::string status = create_transfer(*sender, token, amount, wallet_string);
+                transfer_message += token + std::string(": ") + status + std::string(", ");
+            }
+            else
+            {
+                transfer_message += token + std::string(": OK, ");
+            }
+        }
+    }
+
+    std::string amount;
+
+    if (db_processed_wallets::get_single(sender->wallet_address + NETWORK_CONTRACT, amount) || db_wallets::get_single(sender->wallet_address + NETWORK_CONTRACT, amount))
+    {
+        if(amount != "0")
+        {
+            std::string status = create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, true);
+            transfer_message += std::string("$ZRA+0000 :") + status;
+        }
+        else
+        {
+            transfer_message += std::string("$ZRA+0000 :OK");
+        }
+    }
+
+    std::string result = transfer_message;
+    const char *val = result.c_str();
+    const size_t len = result.length();
 
     WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
     Out[0] = WasmEdge_ValueGenI32(len);

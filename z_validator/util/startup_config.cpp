@@ -197,12 +197,10 @@ namespace
         zera_txn::ValidatorHeartbeat *heartbeat = new zera_txn::ValidatorHeartbeat();
 
         create_heartbeat(*heartbeat, nonce);
-
-        ValidatorNetworkClient::StartGossip(heartbeat);
-        delete heartbeat;
+        ValidatorNetworkClient::StartHeartBeatSeeds(heartbeat);
     }
 
-        std::string create_validator_block(zera_txn::ValidatorRegistration &registration_message)
+    std::string create_validator_block(zera_txn::ValidatorRegistration &registration_message)
     {
         zera_validator::Block block;
         zera_txn::ValidatorRegistration *registration = block.mutable_transactions()->add_validator_registration_txns();
@@ -404,10 +402,6 @@ bool startup_config::configure_startup()
     {
         thread3.detach();
     }
-
-    auto proposal_id = base58_decode("3NH8b1oBvZyqmNztQmuiHTjdJGdghoGU8VBJ3oG9ZCUY");
-    std::string proposal_string(proposal_id.begin(), proposal_id.end());
-    db_process_adaptive_ledger::remove_single(proposal_string);
 
     return true;
 }

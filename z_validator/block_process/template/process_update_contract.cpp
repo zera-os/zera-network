@@ -271,9 +271,10 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
     if (txn->has_name())
     {
         std::regex name_pattern("^[A-Za-z0-9 ]*$");
-        
+
         if (txn->name().size() < 3 || txn->name().size() > 200 || !std::regex_match(txn->name(), name_pattern))
         {
+            logging::print(txn->name(), true);
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_update_contract.cpp: check_parameters: Contract name is either too big or too small.", zera_txn::TXN_STATUS::INVALID_CONTRACT_PARAMETERS);
         }
     }

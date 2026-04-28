@@ -40,6 +40,12 @@ WasmEdge_Result CurrentSmartContractWallet(void *Data, const WasmEdge_CallingFra
 WasmEdge_Result CalledSmartContractWallet(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                           const WasmEdge_Value *In, WasmEdge_Value *Out);
 
+WasmEdge_Result CurrentSmartContract(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                     const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result ContractWallet(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                               const WasmEdge_Value *In, WasmEdge_Value *Out);
+
 WasmEdge_Result CurrentSmartContractBalance(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                             const WasmEdge_Value *In, WasmEdge_Value *Out);
 
@@ -73,6 +79,27 @@ WasmEdge_Result WalletExists(void *Data, const WasmEdge_CallingFrameContext *Cal
 
 WasmEdge_Result GetAllStates(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                                      const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result GetAllStatesByPrefix(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                     const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result CurrentGetAllStates(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                    const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result CurrentGetAllStatesByPrefix(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                            const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result StateExists(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                            const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result DelegateStateExists(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                    const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result ContractName(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                             const WasmEdge_Value *In, WasmEdge_Value *Out);
+
+WasmEdge_Result ContractSymbol(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                               const WasmEdge_Value *In, WasmEdge_Value *Out);
 
 // WasmEdge_Result ContractWallets(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
 //                                 const WasmEdge_Value *In, WasmEdge_Value *Out);

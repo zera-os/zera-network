@@ -39,6 +39,11 @@ namespace
     {
         uint256_t fee_type = get_txn_fee(txn_type);
 
+        if(txn->base().fee_id() != NETWORK_CONTRACT)
+        {
+            return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_registration.cpp: process_registration_fees: invalid fee id: " + txn->base().fee_id());
+        }
+
         zera_txn::InstrumentContract contract;
         ZeraStatus status = block_process::get_contract(txn->base().fee_id(), contract);
         if (!status.ok())

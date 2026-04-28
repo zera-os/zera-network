@@ -319,4 +319,6 @@ void block_process::start_block_process()
 
         block_manager.last_heartbeat++;
     }
+
+    logging::print("Block process shutdown initiated", true);
 }

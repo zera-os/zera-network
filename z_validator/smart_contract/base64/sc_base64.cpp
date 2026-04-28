@@ -212,7 +212,7 @@ namespace
     MultiKey read_multi_key(const std::string &data, size_t &pos)
     {
         MultiKey mk;
-        mk.public_keys = read_bytes_vec(data, pos);
+        mk.public_keys = read_string_vec(data, pos);
         mk.signatures = read_bytes_vec(data, pos);
 
         size_t mp_count = read_varint(data, pos);
@@ -227,14 +227,14 @@ namespace
     PublicKey read_public_key(const std::string &data, size_t &pos)
     {
         PublicKey pk;
-        pk.single = read_bytes(data, pos);
+        pk.single = read_postcard_string(data, pos);
 
         // Option<MultiKey>
         if (pos < data.size() && static_cast<uint8_t>(data[pos++]) != 0)
             pk.multi = read_multi_key(data, pos);
 
-        pk.smart_contract_auth = read_option_bytes(data, pos);
-        pk.governance_auth = read_option_bytes(data, pos);
+        pk.smart_contract_auth = read_option_string(data, pos);
+        pk.governance_auth = read_option_string(data, pos);
         return pk;
     }
 
@@ -261,12 +261,57 @@ namespace
     {
         ContractFees cf;
         cf.fee = read_postcard_string(data, pos);
-        cf.fee_address = read_option_bytes(data, pos);
+        cf.fee_address = read_option_string(data, pos);
         cf.burn = read_postcard_string(data, pos);
         cf.validator = read_postcard_string(data, pos);
         cf.allowed_fee_instrument = read_string_vec(data, pos);
         cf.contract_fee_type = static_cast<ContractFeeType>(read_u32(data, pos));
         return cf;
+    }
+
+    std::vector<uint64_t> read_u64_vec(const std::string &data, size_t &pos)
+    {
+        size_t count = read_varint(data, pos);
+        std::vector<uint64_t> result;
+        result.reserve(count);
+        for (size_t i = 0; i < count && pos < data.size(); ++i)
+            result.push_back(read_u64(data, pos));
+        return result;
+    }
+
+    TransferAuthentication read_transfer_authentication(const std::string &data, size_t &pos)
+    {
+        TransferAuthentication ta;
+
+        size_t pk_count = read_varint(data, pos);
+        ta.public_key.reserve(pk_count);
+        for (size_t i = 0; i < pk_count && pos < data.size(); ++i)
+            ta.public_key.push_back(read_public_key(data, pos));
+
+        ta.signature = read_bytes_vec(data, pos);
+        ta.nonce = read_u64_vec(data, pos);
+        ta.allowance_address = read_string_vec(data, pos);
+        ta.allowance_nonce = read_u64_vec(data, pos);
+        return ta;
+    }
+
+    InputTransfers read_input_transfers(const std::string &data, size_t &pos)
+    {
+        InputTransfers it;
+        it.index = read_u64(data, pos);
+        it.amount = read_postcard_string(data, pos);
+        it.fee_percent = read_u32(data, pos);
+        it.contract_fee_percent = read_option_u32(data, pos);
+        return it;
+    }
+
+    OutputTransfers read_output_transfers(const std::string &data, size_t &pos)
+    {
+        OutputTransfers ot;
+        ot.wallet_address = read_postcard_string(data, pos);
+        ot.amount = read_postcard_string(data, pos);
+        ot.memo = read_option_string(data, pos);
+        return ot;
     }
 
     KeyValuePair read_key_value_pair(const std::string &data, size_t &pos)
@@ -351,6 +396,30 @@ namespace
 
         g.max_approved = read_option_u32(data, pos);
         return g;
+    }
+
+    PreMintWallet read_premint_wallet(const std::string &data, size_t &pos)
+    {
+        PreMintWallet pw;
+        pw.address = read_postcard_string(data, pos);
+        pw.amount = read_postcard_string(data, pos);
+        return pw;
+    }
+
+    CoinDenomination read_coin_denomination(const std::string &data, size_t &pos)
+    {
+        CoinDenomination cd;
+        cd.denomination_name = read_postcard_string(data, pos);
+        cd.amount = read_postcard_string(data, pos);
+        return cd;
+    }
+
+    MaxSupplyRelease read_max_supply_release(const std::string &data, size_t &pos)
+    {
+        MaxSupplyRelease mr;
+        mr.release_date = read_proto_timestamp(data, pos);
+        mr.amount = read_postcard_string(data, pos);
+        return mr;
     }
 
     Sender read_sender(const std::string &data, size_t &pos)
@@ -631,6 +700,127 @@ ContractUpdateTXN decode_contract_update_txn(const std::string &b64_encoded)
     txn.kyc_status = read_option_bool(postcard_bytes, pos);
     txn.immutable_kyc_status = read_option_bool(postcard_bytes, pos);
     txn.quash_threshold = read_option_u32(postcard_bytes, pos);
+
+    return txn;
+}
+
+InstrumentContractTXN decode_instrument_contract_txn(const std::string &b64_encoded)
+{
+    InstrumentContractTXN txn;
+
+    std::string postcard_bytes = base64_decode(b64_encoded);
+    if (postcard_bytes.empty())
+        return txn;
+
+    size_t pos = 0;
+
+    txn.contract_version = read_u64(postcard_bytes, pos);
+    txn.symbol = read_postcard_string(postcard_bytes, pos);
+    txn.name = read_postcard_string(postcard_bytes, pos);
+
+    // Option<Governance>
+    if (pos < postcard_bytes.size() && static_cast<uint8_t>(postcard_bytes[pos++]) != 0)
+        txn.governance = read_governance(postcard_bytes, pos);
+
+    // Vec<RestrictedKey>
+    size_t rk_count = read_varint(postcard_bytes, pos);
+    txn.restricted_keys.reserve(rk_count);
+    for (size_t i = 0; i < rk_count && pos < postcard_bytes.size(); ++i)
+        txn.restricted_keys.push_back(read_restricted_key(postcard_bytes, pos));
+
+    txn.max_supply = read_option_string(postcard_bytes, pos);
+
+    // Option<ContractFees>
+    if (pos < postcard_bytes.size() && static_cast<uint8_t>(postcard_bytes[pos++]) != 0)
+        txn.contract_fees = read_contract_fees(postcard_bytes, pos);
+
+    // Vec<PreMintWallet>
+    size_t pw_count = read_varint(postcard_bytes, pos);
+    txn.premint_wallets.reserve(pw_count);
+    for (size_t i = 0; i < pw_count && pos < postcard_bytes.size(); ++i)
+        txn.premint_wallets.push_back(read_premint_wallet(postcard_bytes, pos));
+
+    // Option<CoinDenomination>
+    if (pos < postcard_bytes.size() && static_cast<uint8_t>(postcard_bytes[pos++]) != 0)
+        txn.coin_denomination = read_coin_denomination(postcard_bytes, pos);
+
+    // Vec<KeyValuePair>
+    size_t kv_count = read_varint(postcard_bytes, pos);
+    txn.custom_parameters.reserve(kv_count);
+    for (size_t i = 0; i < kv_count && pos < postcard_bytes.size(); ++i)
+        txn.custom_parameters.push_back(read_key_value_pair(postcard_bytes, pos));
+
+    txn.contract_id = read_postcard_string(postcard_bytes, pos);
+
+    // Vec<ExpenseRatio>
+    size_t er_count = read_varint(postcard_bytes, pos);
+    txn.expense_ratio.reserve(er_count);
+    for (size_t i = 0; i < er_count && pos < postcard_bytes.size(); ++i)
+        txn.expense_ratio.push_back(read_expense_ratio(postcard_bytes, pos));
+
+    txn.contract_type = static_cast<ContractType>(read_u32(postcard_bytes, pos));
+    txn.update_contract_fees = read_bool(postcard_bytes, pos);
+    txn.update_expense_ratio = read_bool(postcard_bytes, pos);
+    txn.quash_threshold = read_option_u32(postcard_bytes, pos);
+
+    // Vec<TokenCompliance>
+    size_t tc_count = read_varint(postcard_bytes, pos);
+    txn.token_compliance.reserve(tc_count);
+    for (size_t i = 0; i < tc_count && pos < postcard_bytes.size(); ++i)
+        txn.token_compliance.push_back(read_token_compliance(postcard_bytes, pos));
+
+    txn.kyc_status = read_bool(postcard_bytes, pos);
+    txn.immutable_kyc_status = read_bool(postcard_bytes, pos);
+
+    // Vec<MaxSupplyRelease>
+    size_t msr_count = read_varint(postcard_bytes, pos);
+    txn.max_supply_release.reserve(msr_count);
+    for (size_t i = 0; i < msr_count && pos < postcard_bytes.size(); ++i)
+        txn.max_supply_release.push_back(read_max_supply_release(postcard_bytes, pos));
+
+    return txn;
+}
+
+CoinTXN decode_coin_txn(const std::string &b64_encoded)
+{
+    CoinTXN txn;
+
+    std::string postcard_bytes = base64_decode(b64_encoded);
+    if (postcard_bytes.empty())
+        return txn;
+
+    size_t pos = 0;
+    txn.contract_id = read_postcard_string(postcard_bytes, pos);
+    txn.auth = read_transfer_authentication(postcard_bytes, pos);
+
+    size_t input_count = read_varint(postcard_bytes, pos);
+    txn.input_transfers.reserve(input_count);
+    for (size_t i = 0; i < input_count && pos < postcard_bytes.size(); ++i)
+        txn.input_transfers.push_back(read_input_transfers(postcard_bytes, pos));
+
+    size_t output_count = read_varint(postcard_bytes, pos);
+    txn.output_transfers.reserve(output_count);
+    for (size_t i = 0; i < output_count && pos < postcard_bytes.size(); ++i)
+        txn.output_transfers.push_back(read_output_transfers(postcard_bytes, pos));
+
+    txn.contract_fee_id = read_option_string(postcard_bytes, pos);
+    txn.contract_fee_amount = read_option_string(postcard_bytes, pos);
+
+    return txn;
+}
+
+MintTXN decode_mint_txn(const std::string &b64_encoded)
+{
+    MintTXN txn;
+
+    std::string postcard_bytes = base64_decode(b64_encoded);
+    if (postcard_bytes.empty())
+        return txn;
+
+    size_t pos = 0;
+    txn.contract_id = read_postcard_string(postcard_bytes, pos);
+    txn.amount = read_postcard_string(postcard_bytes, pos);
+    txn.recipient_address = read_postcard_string(postcard_bytes, pos);
 
     return txn;
 }

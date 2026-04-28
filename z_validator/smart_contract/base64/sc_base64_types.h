@@ -145,6 +145,13 @@ enum class ProposalPeriod : uint32_t
     Months = 1,
 };
 
+enum class ContractType : uint32_t
+{
+    Token = 0,
+    Nft = 1,
+    Sbt = 2,
+};
+
 // ===== Structs =====
 
 struct Sender
@@ -175,7 +182,7 @@ struct MultiPatterns
 
 struct MultiKey
 {
-    std::vector<std::vector<uint8_t>> public_keys;
+    std::vector<std::string> public_keys;
     std::vector<std::vector<uint8_t>> signatures;
     std::vector<MultiPatterns> multi_patterns;
     std::vector<std::string> hash_tokens;
@@ -183,10 +190,10 @@ struct MultiKey
 
 struct PublicKey
 {
-    std::vector<uint8_t> single;
+    std::string single;
     std::optional<MultiKey> multi;
-    std::optional<std::vector<uint8_t>> smart_contract_auth;
-    std::optional<std::vector<uint8_t>> governance_auth;
+    std::optional<std::string> smart_contract_auth;
+    std::optional<std::string> governance_auth;
 };
 
 struct RestrictedKey
@@ -209,7 +216,7 @@ struct RestrictedKey
 struct ContractFees
 {
     std::string fee;
-    std::optional<std::vector<uint8_t>> fee_address;
+    std::optional<std::string> fee_address;
     std::string burn;
     std::string validator;
     std::vector<std::string> allowed_fee_instrument;
@@ -279,4 +286,87 @@ struct ContractUpdateTXN
     std::optional<bool> kyc_status;
     std::optional<bool> immutable_kyc_status;
     std::optional<uint32_t> quash_threshold;
+};
+
+struct PreMintWallet
+{
+    std::string address;
+    std::string amount;
+};
+
+struct CoinDenomination
+{
+    std::string denomination_name;
+    std::string amount;
+};
+
+struct MaxSupplyRelease
+{
+    ProtoTimestamp release_date;
+    std::string amount;
+};
+
+struct TransferAuthentication
+{
+    std::vector<PublicKey> public_key;
+    std::vector<std::vector<uint8_t>> signature;
+    std::vector<uint64_t> nonce;
+    std::vector<std::string> allowance_address;
+    std::vector<uint64_t> allowance_nonce;
+};
+
+struct InputTransfers
+{
+    uint64_t index;
+    std::string amount;
+    uint32_t fee_percent;
+    std::optional<uint32_t> contract_fee_percent;
+};
+
+struct OutputTransfers
+{
+    std::string wallet_address;
+    std::string amount;
+    std::optional<std::string> memo;
+};
+
+struct CoinTXN
+{
+    std::string contract_id;
+    TransferAuthentication auth;
+    std::vector<InputTransfers> input_transfers;
+    std::vector<OutputTransfers> output_transfers;
+    std::optional<std::string> contract_fee_id;
+    std::optional<std::string> contract_fee_amount;
+};
+
+struct MintTXN
+{
+    std::string contract_id;
+    std::string amount;
+    std::string recipient_address;
+};
+
+struct InstrumentContractTXN
+{
+    uint64_t contract_version;
+    std::string symbol;
+    std::string name;
+    std::optional<Governance> governance;
+    std::vector<RestrictedKey> restricted_keys;
+    std::optional<std::string> max_supply;
+    std::optional<ContractFees> contract_fees;
+    std::vector<PreMintWallet> premint_wallets;
+    std::optional<CoinDenomination> coin_denomination;
+    std::vector<KeyValuePair> custom_parameters;
+    std::string contract_id;
+    std::vector<ExpenseRatio> expense_ratio;
+    ContractType contract_type;
+    bool update_contract_fees;
+    bool update_expense_ratio;
+    std::optional<uint32_t> quash_threshold;
+    std::vector<TokenCompliance> token_compliance;
+    bool kyc_status;
+    bool immutable_kyc_status;
+    std::vector<MaxSupplyRelease> max_supply_release;
 };

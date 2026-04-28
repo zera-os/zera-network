@@ -4,7 +4,7 @@
 #include <string>
 #include <cstdlib>
 
-constexpr int VERSION = 100004; //version of the validator
+constexpr int VERSION = 100005; //version of the validator
 //1000000000000000000 1 dollar
 //10000000000000000   1 cent
 //1 000 000 000 000 000 000 1 dollar

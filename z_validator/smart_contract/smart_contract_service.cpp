@@ -258,8 +258,12 @@ std::vector<std::any> parse_result(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryIns
   std::memcpy(&retPointer, ret_pointer, sizeof(int));
 
   int p_data_len = size * 3 * 4;
-  unsigned char p_data[p_data_len];
-  WasmEdge_MemoryInstanceGetData(MemoryCxt, p_data, retPointer, p_data_len);
+  if (p_data_len < 0 || p_data_len > 1048576)
+  {
+    throw std::runtime_error("Error: parse_result p_data_len out of bounds");
+  }
+  std::vector<unsigned char> p_data(p_data_len);
+  WasmEdge_MemoryInstanceGetData(MemoryCxt, p_data.data(), retPointer, p_data_len);
   deallocate(VMCxt, retPointer, p_data_len);
 
   std::vector<int> p_values;
@@ -267,7 +271,7 @@ std::vector<std::any> parse_result(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryIns
   for (int i = 0; i < (size * 3); ++i)
   {
     unsigned char p_data_slice[4];
-    splice(p_data, i * 4, (i + 1) * 4, p_data_slice);
+    splice(p_data.data(), i * 4, (i + 1) * 4, p_data_slice);
 
     int p_data_slice_int;
     std::memcpy(&p_data_slice_int, p_data_slice, sizeof(int));
@@ -279,8 +283,15 @@ std::vector<std::any> parse_result(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryIns
   for (int i = 0; i < size; ++i)
   {
     const int len = p_values[i * 3 + 2];
-    unsigned char bytes[len];
-    WasmEdge_MemoryInstanceGetData(MemoryCxt, bytes, p_values[i * 3], len);
+    if (len < 0 || len > 1048576)
+    {
+      throw std::runtime_error("Error: parse_result len out of bounds: " + std::to_string(len));
+    }
+    std::vector<unsigned char> bytes(len > 0 ? len : 1);
+    if (len > 0)
+    {
+      WasmEdge_MemoryInstanceGetData(MemoryCxt, bytes.data(), p_values[i * 3], len);
+    }
     deallocate(VMCxt, p_values[i * 3], len);
 
     const int retType = p_values[i * 3 + 1];
@@ -289,28 +300,28 @@ std::vector<std::any> parse_result(WasmEdge_VMContext *VMCxt, WasmEdge_MemoryIns
     {
     case RetTypes::String:
     {
-      std::string bytesString((const char *)bytes);
+      std::string bytesString(reinterpret_cast<const char *>(bytes.data()), len);
       results.push_back(bytesString);
       break;
     }
     case RetTypes::I32:
     {
       int val;
-      std::memcpy(&val, bytes, sizeof(int));
+      std::memcpy(&val, bytes.data(), sizeof(int));
       results.push_back(val);
       break;
     }
     case RetTypes::F32:
     {
       float val;
-      std::memcpy(&val, bytes, sizeof(float));
+      std::memcpy(&val, bytes.data(), sizeof(float));
       results.push_back(val);
       break;
     }
     case RetTypes::Bool:
     {
       bool val;
-      std::memcpy(&val, bytes, sizeof(bool));
+      std::memcpy(&val, bytes.data(), sizeof(bool));
       results.push_back(val);
       break;
     }
@@ -325,7 +336,11 @@ std::vector<std::any> read_and_parse_result(WasmEdge_VMContext *VMCxt, WasmEdge_
   uint32_t size = 9;
   unsigned char rvec[size];
 
-  WasmEdge_MemoryInstanceGetData(MemoryCxt, rvec, resultsPointer, size);
+  WasmEdge_Result memRes = WasmEdge_MemoryInstanceGetData(MemoryCxt, rvec, resultsPointer, size);
+  if (!WasmEdge_ResultOK(memRes))
+  {
+    throw std::runtime_error("Error: read_and_parse_result failed to read results from WASM memory");
+  }
   deallocate(VMCxt, resultsPointer, size);
 
   unsigned char flag = rvec[0];
@@ -1079,6 +1094,42 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_CurrentHold, sizeof(ReturnList_CurrentHold) / sizeof(ReturnList_CurrentHold[0]),
                      CurrentHold, "current_hold");
 
+  // Derived Hold
+  enum WasmEdge_ValType ParamList_DerivedHold[7] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedHold[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedHold, sizeof(ParamList_DerivedHold) / sizeof(ParamList_DerivedHold[0]),
+                     ReturnList_DerivedHold, sizeof(ReturnList_DerivedHold) / sizeof(ReturnList_DerivedHold[0]),
+                     DerivedHold, "derived_hold");
+
+  // Derived Delegate Hold
+  enum WasmEdge_ValType ParamList_DerivedDelegateHold[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                             WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedDelegateHold[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedDelegateHold, sizeof(ParamList_DerivedDelegateHold) / sizeof(ParamList_DerivedDelegateHold[0]),
+                     ReturnList_DerivedDelegateHold, sizeof(ReturnList_DerivedDelegateHold) / sizeof(ReturnList_DerivedDelegateHold[0]),
+                     DerivedDelegateHold, "derived_delegate_hold");
+
+  // Delegate Hold
+  enum WasmEdge_ValType ParamList_DelegateHold[7] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DelegateHold[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DelegateHold, sizeof(ParamList_DelegateHold) / sizeof(ParamList_DelegateHold[0]),
+                     ReturnList_DelegateHold, sizeof(ReturnList_DelegateHold) / sizeof(ReturnList_DelegateHold[0]),
+                     DelegateHold, "delegate_hold");
+
+  // Derived Current Hold
+  enum WasmEdge_ValType ParamList_DerivedCurrentHold[7] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedCurrentHold[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedCurrentHold, sizeof(ParamList_DerivedCurrentHold) / sizeof(ParamList_DerivedCurrentHold[0]),
+                     ReturnList_DerivedCurrentHold, sizeof(ReturnList_DerivedCurrentHold) / sizeof(ReturnList_DerivedCurrentHold[0]),
+                     DerivedCurrentHold, "derived_current_hold");
+
   enum WasmEdge_ValType ParamList_CurrentSend[7] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_CurrentSend[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
@@ -1106,6 +1157,14 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_Transfer, sizeof(ParamList_Transfer) / sizeof(ParamList_Transfer[0]),
                      ReturnList_Transfer, sizeof(ReturnList_Transfer) / sizeof(ReturnList_Transfer[0]),
                      Transfer, "transfer");
+
+  // Transfer All
+  enum WasmEdge_ValType ParamList_TransferAll[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_TransferAll[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_TransferAll, sizeof(ParamList_TransferAll) / sizeof(ParamList_TransferAll[0]),
+                     ReturnList_TransferAll, sizeof(ReturnList_TransferAll) / sizeof(ReturnList_TransferAll[0]),
+                     TransferAll, "transfer_all");
 
   enum WasmEdge_ValType ParamList_DBGetData[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_DBGetData[1] = {WasmEdge_ValType_I32};
@@ -1194,6 +1253,20 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_ContractDenomination, sizeof(ReturnList_ContractDenomination) / sizeof(ReturnList_ContractDenomination[0]),
                      ContractDenomination, "contract_denomination");
 
+  enum WasmEdge_ValType ParamList_ContractName[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_ContractName[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_ContractName, sizeof(ParamList_ContractName) / sizeof(ParamList_ContractName[0]),
+                     ReturnList_ContractName, sizeof(ReturnList_ContractName) / sizeof(ReturnList_ContractName[0]),
+                     ContractName, "contract_name");
+
+  enum WasmEdge_ValType ParamList_ContractSymbol[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_ContractSymbol[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_ContractSymbol, sizeof(ParamList_ContractSymbol) / sizeof(ParamList_ContractSymbol[0]),
+                     ReturnList_ContractSymbol, sizeof(ReturnList_ContractSymbol) / sizeof(ReturnList_ContractSymbol[0]),
+                     ContractSymbol, "contract_symbol");
+
   enum WasmEdge_ValType ParamList_WalletBalance[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_WalletBalance[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
@@ -1228,6 +1301,20 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ParamList_CurrentSmartContractWallet, sizeof(ParamList_CurrentSmartContractWallet) / sizeof(ParamList_CurrentSmartContractWallet[0]),
                      ReturnList_CurrentSmartContractWallet, sizeof(ReturnList_CurrentSmartContractWallet) / sizeof(ReturnList_CurrentSmartContractWallet[0]),
                      CurrentSmartContractWallet, "current_smart_contract_wallet");
+
+  enum WasmEdge_ValType ParamList_CurrentSmartContract[1] = {WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_CurrentSmartContract[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_CurrentSmartContract, sizeof(ParamList_CurrentSmartContract) / sizeof(ParamList_CurrentSmartContract[0]),
+                     ReturnList_CurrentSmartContract, sizeof(ReturnList_CurrentSmartContract) / sizeof(ReturnList_CurrentSmartContract[0]),
+                     CurrentSmartContract, "current_smart_contract");
+
+  enum WasmEdge_ValType ParamList_ContractWallet[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_ContractWallet[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_ContractWallet, sizeof(ParamList_ContractWallet) / sizeof(ParamList_ContractWallet[0]),
+                     ReturnList_ContractWallet, sizeof(ReturnList_ContractWallet) / sizeof(ReturnList_ContractWallet[0]),
+                     ContractWallet, "contract_wallet");
 
   enum WasmEdge_ValType ParamList_CalledSmartContractWallet[1] = {WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_CalledSmartContractWallet[1] = {WasmEdge_ValType_I32};
@@ -1423,6 +1510,29 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_SendMulti, sizeof(ReturnList_SendMulti) / sizeof(ReturnList_SendMulti[0]),
                      SendMulti, "send_multi");
 
+  // Current Send Multi
+  enum WasmEdge_ValType ParamList_CurrentSendMulti[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                         WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                         WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                         WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_CurrentSendMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_CurrentSendMulti, sizeof(ParamList_CurrentSendMulti) / sizeof(ParamList_CurrentSendMulti[0]),
+                     ReturnList_CurrentSendMulti, sizeof(ReturnList_CurrentSendMulti) / sizeof(ReturnList_CurrentSendMulti[0]),
+                     CurrentSendMulti, "current_send_multi");
+
+  // Delegate Send Multi
+  enum WasmEdge_ValType ParamList_DelegateSendMulti[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                           WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DelegateSendMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DelegateSendMulti, sizeof(ParamList_DelegateSendMulti) / sizeof(ParamList_DelegateSendMulti[0]),
+                     ReturnList_DelegateSendMulti, sizeof(ReturnList_DelegateSendMulti) / sizeof(ReturnList_DelegateSendMulti[0]),
+                     DelegateSendMulti, "delegate_send_multi");
+
   // Transfer Multi
   enum WasmEdge_ValType ParamList_TransferMulti[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32,
                                                       WasmEdge_ValType_I32, WasmEdge_ValType_I32,
@@ -1494,10 +1604,9 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_DerivedSendAll, sizeof(ReturnList_DerivedSendAll) / sizeof(ReturnList_DerivedSendAll[0]),
                      DerivedSendAll, "derived_send_all");
 
-  enum WasmEdge_ValType ParamList_DerivedDelegateSendAll[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+  enum WasmEdge_ValType ParamList_DerivedDelegateSendAll[9] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
                                                                WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
-                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
-                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+                                                               WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_DerivedDelegateSendAll[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
                      ParamList_DerivedDelegateSendAll, sizeof(ParamList_DerivedDelegateSendAll) / sizeof(ParamList_DerivedDelegateSendAll[0]),
@@ -1558,12 +1667,57 @@ WasmEdge_ModuleInstanceContext *CreateExternModule()
                      ReturnList_DerivedDelegateSendMulti, sizeof(ReturnList_DerivedDelegateSendMulti) / sizeof(ReturnList_DerivedDelegateSendMulti[0]),
                      DerivedDelegateSendMulti, "derived_delegate_send_multi");
 
+  enum WasmEdge_ValType ParamList_DerivedCurrentSendMulti[11] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                                 WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                                 WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32,
+                                                                 WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DerivedCurrentSendMulti[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DerivedCurrentSendMulti, sizeof(ParamList_DerivedCurrentSendMulti) / sizeof(ParamList_DerivedCurrentSendMulti[0]),
+                     ReturnList_DerivedCurrentSendMulti, sizeof(ReturnList_DerivedCurrentSendMulti) / sizeof(ReturnList_DerivedCurrentSendMulti[0]),
+                     DerivedCurrentSendMulti, "derived_current_send_multi");
+
   enum WasmEdge_ValType ParamList_GetAllStates[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_GetAllStates[1] = {WasmEdge_ValType_I32};
   CreateHostFunction(HostModCxt,
                      ParamList_GetAllStates, sizeof(ParamList_GetAllStates) / sizeof(ParamList_GetAllStates[0]),
                      ReturnList_GetAllStates, sizeof(ReturnList_GetAllStates) / sizeof(ReturnList_GetAllStates[0]),
                      GetAllStates, "get_all_states");
+
+  enum WasmEdge_ValType ParamList_GetAllStatesByPrefix[5] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_GetAllStatesByPrefix[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_GetAllStatesByPrefix, sizeof(ParamList_GetAllStatesByPrefix) / sizeof(ParamList_GetAllStatesByPrefix[0]),
+                     ReturnList_GetAllStatesByPrefix, sizeof(ReturnList_GetAllStatesByPrefix) / sizeof(ReturnList_GetAllStatesByPrefix[0]),
+                     GetAllStatesByPrefix, "get_all_states_by_prefix");
+
+  enum WasmEdge_ValType ParamList_CurrentGetAllStates[1] = {WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_CurrentGetAllStates[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_CurrentGetAllStates, sizeof(ParamList_CurrentGetAllStates) / sizeof(ParamList_CurrentGetAllStates[0]),
+                     ReturnList_CurrentGetAllStates, sizeof(ReturnList_CurrentGetAllStates) / sizeof(ReturnList_CurrentGetAllStates[0]),
+                     CurrentGetAllStates, "current_get_all_states");
+
+  enum WasmEdge_ValType ParamList_CurrentGetAllStatesByPrefix[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_CurrentGetAllStatesByPrefix[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_CurrentGetAllStatesByPrefix, sizeof(ParamList_CurrentGetAllStatesByPrefix) / sizeof(ParamList_CurrentGetAllStatesByPrefix[0]),
+                     ReturnList_CurrentGetAllStatesByPrefix, sizeof(ReturnList_CurrentGetAllStatesByPrefix) / sizeof(ReturnList_CurrentGetAllStatesByPrefix[0]),
+                     CurrentGetAllStatesByPrefix, "current_get_all_states_by_prefix");
+
+  enum WasmEdge_ValType ParamList_StateExists[2] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_StateExists[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_StateExists, sizeof(ParamList_StateExists) / sizeof(ParamList_StateExists[0]),
+                     ReturnList_StateExists, sizeof(ReturnList_StateExists) / sizeof(ReturnList_StateExists[0]),
+                     StateExists, "state_exists");
+
+  enum WasmEdge_ValType ParamList_DelegateStateExists[4] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
+  enum WasmEdge_ValType ReturnList_DelegateStateExists[1] = {WasmEdge_ValType_I32};
+  CreateHostFunction(HostModCxt,
+                     ParamList_DelegateStateExists, sizeof(ParamList_DelegateStateExists) / sizeof(ParamList_DelegateStateExists[0]),
+                     ReturnList_DelegateStateExists, sizeof(ReturnList_DelegateStateExists) / sizeof(ReturnList_DelegateStateExists[0]),
+                     DelegateStateExists, "delegate_state_exists");
 
   enum WasmEdge_ValType ParamList_SubmitTXN[3] = {WasmEdge_ValType_I32, WasmEdge_ValType_I32, WasmEdge_ValType_I32};
   enum WasmEdge_ValType ReturnList_SubmitTXN[1] = {WasmEdge_ValType_I32};

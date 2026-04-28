@@ -12,7 +12,17 @@ std::string nt_process_network_txn(SenderDataType *sender, const NetworkTXN &net
 
 std::string nt_process_contract_update(SenderDataType *sender, const NetworkTXN &network_txn);
 
+std::string nt_process_contract(SenderDataType *sender, const NetworkTXN &network_txn);
+
+std::string nt_process_coin(SenderDataType *sender, const NetworkTXN &network_txn);
+
+std::string nt_process_mint(SenderDataType *sender, const NetworkTXN &network_txn);
+
 zera_txn::BaseTXN create_base(SenderDataType *sender, const Sender &sender_data);
+
+zera_txn::BaseTXN create_current_sc_base(SenderDataType *sender);
+
+bool set_sender_public_key(zera_txn::PublicKey *pk, SenderDataType *sender, const Sender &sender_data);
 
 template <typename TXType>
 void set_txn_hash(TXType *txn)
@@ -29,8 +39,15 @@ ZeraStatus process_txn(TXType *txn, zera_txn::TXNS &block_txns, const zera_txn::
     ZeraStatus status = proposing::unpack_process_wrapper(txn, &block_txns, txn_type, false, fee_address, true, sender->txn_hash, sender->fee_smart_contract_wallet);
     if (status.ok())
     {
-        sender->txn_hashes.push_back(txn->base().hash());
-        txn_hash_tracker::add_sc_hash(txn->base().hash());
+        if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+        {
+            sender->txn_hashes.push_back(txn->base().hash());
+            txn_hash_tracker::add_sc_hash(txn->base().hash());
+        }
+        else
+        {
+            balance_tracker::remove_txn_balance(txn->base().hash());
+        }
     }
 
     return status;

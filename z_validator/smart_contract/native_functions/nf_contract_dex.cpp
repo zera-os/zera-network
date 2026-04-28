@@ -40,9 +40,16 @@ namespace
         ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
         if (status.ok())
         {
-            sender.txn_hashes.push_back(txn.base().hash());
-            block_txns.add_contract_txns()->CopyFrom(txn);
-            txn_hash_tracker::add_sc_hash(txn.base().hash());
+            if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+            {
+                sender.txn_hashes.push_back(txn.base().hash());
+                block_txns.add_contract_txns()->CopyFrom(txn);
+                txn_hash_tracker::add_sc_hash(txn.base().hash());
+            }
+            else
+            {
+                balance_tracker::remove_txn_balance(txn.base().hash());
+            }
         }
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());
 
