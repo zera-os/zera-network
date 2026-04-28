@@ -243,8 +243,11 @@ ZeraStatus proposing::make_block(zera_validator::Block *block, const transaction
 
     set_all_token_fees(block, txn_hash_vec, ValidatorConfig::get_fee_address_string());
     add_temp_wallet_balance(txn_hash_vec, ValidatorConfig::get_fee_address_string());
+
+
     allowance_tracker::add_block_allowance(allowance_txn_hash_vec);
     merkle_tree::build_merkle_tree(block);
+
     block_utils::set_block(block);
     std::string block_write;
     std::string header_write;

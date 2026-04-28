@@ -81,17 +81,17 @@ namespace
     ZeraStatus mint(const zera_txn::MintTXN *txn, zera_txn::InstrumentContract &contract)
     {
 
-        //TODO - inspect this
         std::string contract_id = txn->contract_id();
         if(contract_id.substr(0, 5) == "$sol-")
         {
             std::string public_key = wallets::get_public_key_string(txn->base().public_key());
 
-            if(public_key != "sc_bridge_proxy_1")
+            if(public_key != "sc_bridge_proxy_1" && public_key != "sc_zera_bridge_proxy_1")
             {
                 return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_mint.cpp: mint: Only bridge smart contract can mint.", zera_txn::TXN_STATUS::INVALID_AUTH_KEY);
             }
         }
+
 
         if (contract.type() != zera_txn::CONTRACT_TYPE::TOKEN)
         {
@@ -130,7 +130,7 @@ namespace
 }
 
 template <>
-ZeraStatus block_process::process_txn<zera_txn::MintTXN>(const zera_txn::MintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::MintTXN>(const zera_txn::MintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     uint64_t nonce = txn->base().nonce();
     ZeraStatus status;
@@ -145,7 +145,7 @@ ZeraStatus block_process::process_txn<zera_txn::MintTXN>(const zera_txn::MintTXN
         }
     }
 
-    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::MINT_TYPE, fee_address);
+    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::MINT_TYPE, fee_address, sc_txn, sc_fee_address);
     if (!status.ok())
     {
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.message(), status.txn_status());

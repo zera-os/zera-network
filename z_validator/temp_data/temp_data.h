@@ -192,3 +192,11 @@ class recieved_txn_tracker
     static std::vector<std::string> recieved_txns;
     static std::mutex mtx;
 };
+
+class fee_token_tracker{
+    public:
+    static bool add_temp_fee_token(const std::string &contract_id, const uint256_t &amount, const uint256_t &denomination);
+
+    private:
+    static std::mutex mtx;
+};

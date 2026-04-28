@@ -199,6 +199,7 @@ ZeraStatus proposing::processTransaction(zera_txn::TXNWrapper &wrapper, zera_txn
     }
     else if (wrapper.proposal_result_txn())
     {
+        logging::print("Proposal result txn is passed and stored", true);
         status = gov_process::process_ledgers(block_txns, wrapper, fee_address);
     }
     else if (wrapper.has_burn_sbt_txn())
@@ -250,6 +251,7 @@ ZeraStatus proposing::processTransaction(zera_txn::TXNWrapper &wrapper, zera_txn
             logging::print("Required version txn is passed and stored");
             txn_hash_tracker::add_hash(wrapper.required_version_txn().base().hash());
             block_txns->mutable_required_version_txn()->CopyFrom(wrapper.required_version_txn());
+            add_used_nonce(wrapper.required_version_txn());
         }
     }
     else if (wrapper.has_allowance_txn())
@@ -259,6 +261,17 @@ ZeraStatus proposing::processTransaction(zera_txn::TXNWrapper &wrapper, zera_txn
         {
             txn_hash_tracker::add_hash(wrapper.allowance_txn().base().hash());
             block_txns->add_allowance_txns()->CopyFrom(wrapper.allowance_txn());
+            add_used_nonce(wrapper.allowance_txn());
+        }
+    }
+    else if (wrapper.has_proposal_cancel_txn())
+    {
+        status = proposing::unpack_process_wrapper(wrapper.mutable_proposal_cancel_txn(), block_txns, zera_txn::TRANSACTION_TYPE::PROPOSAL_CANCEL_TYPE, timed, fee_address, wrapper.smart_contract_txn());
+        if (status.ok())
+        {
+            txn_hash_tracker::add_hash(wrapper.proposal_cancel_txn().base().hash());
+            block_txns->add_proposal_cancel_txns()->CopyFrom(wrapper.proposal_cancel_txn());
+            add_used_nonce(wrapper.proposal_cancel_txn());
         }
     }
     else

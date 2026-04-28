@@ -10,6 +10,7 @@
 #include "utils.h"
 #include "smart_contract_sender_data.h"
 #include "fees.h"
+#include "nf_helpers.h"
 
 //*************************************************************
 //                          Holdtxn
@@ -26,12 +27,15 @@ namespace
     {
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t priority_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), priority_equiv);
+        if(priority_equiv == 1)
         {
             priority_equiv = ONE_DOLLAR;
         }
@@ -45,12 +49,15 @@ namespace
         perc_fee_amount = amount * contract_fee / quintillion;
 
         uint256_t fee_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, fee_equiv);
+        if(fee_equiv == 1)
         {
             fee_equiv = ONE_DOLLAR;
         }
+
         uint256_t txn_equiv;
-        if(!zera_fees::get_cur_equiv(fee_id, fee_equiv))
+        zera_fees::get_cur_equiv(fee_id, txn_equiv);
+        if(txn_equiv == 1)
         {
             txn_equiv = ONE_DOLLAR;
         }
@@ -71,7 +78,7 @@ namespace
 
         for (auto id : contract.contract_fees().allowed_fee_instrument())
         {
-            if (id == "$ZRA+0000")
+            if (id == NETWORK_CONTRACT)
             {
                 break;
             }
@@ -79,15 +86,17 @@ namespace
             return false;
         }
 
-        txn->set_contract_fee_id("$ZRA+0000");
+        txn->set_contract_fee_id(NETWORK_CONTRACT);
 
         uint256_t contract_fee(contract.contract_fees().fee());
         uint256_t denomination(contract.coin_denomination().amount());
         uint256_t contract_equiv;
-        if(!zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv))
+        zera_fees::get_cur_equiv(contract.contract_id(), contract_equiv);
+        if(contract_equiv == 1)
         {
             contract_equiv = ONE_DOLLAR;
         }
+
         uint256_t contract_fee_amount;
         switch (contract.contract_fees().contract_fee_type())
         {
@@ -96,10 +105,12 @@ namespace
             // contract fee has quintillion multiplier
             // fee_equiv has 1 quintillion multiplier
             uint256_t fee_equiv;
-            if(!zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv))
+            zera_fees::get_cur_equiv(txn->contract_fee_id(), fee_equiv);
+            if(fee_equiv == 1)
             {
                 fee_equiv = ONE_DOLLAR;
             }
+
             contract_fee_amount = (contract_fee * denomination) / fee_equiv;
             break;
         }
@@ -130,52 +141,6 @@ namespace
 
         return ZeraStatus();
     }
-
-    void calc_fee(zera_txn::CoinTXN *txn)
-    {
-        uint256_t equiv;
-        zera_fees::get_cur_equiv("$ZRA+0000", equiv);
-        zera_txn::InstrumentContract fee_contract;
-        block_process::get_contract("$ZRA+0000", fee_contract);
-
-        uint256_t fee_per_byte(get_txn_fee(zera_txn::TRANSACTION_TYPE::COIN_TYPE));
-        int byte_size = txn->ByteSize() + 64;
-        std::string denomination_str = fee_contract.coin_denomination().amount();
-        int256_t txn_fee_amount;
-        uint256_t fee = fee_per_byte * byte_size;
-        uint256_t denomination(denomination_str);
-        txn_fee_amount = (fee * denomination)  / equiv;
-
-        for (auto public_key : txn->auth().public_key())
-        {
-            uint256_t key_fee = get_key_fee(public_key);
-            txn_fee_amount += (key_fee * denomination) / equiv;
-        }
-        txn->mutable_base()->set_fee_amount(txn_fee_amount.str());
-    }
-
-    void set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("100000000000");
-        base->set_fee_id("$ZRA+0000");
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-    }
-
-    void current_set_base(zera_txn::BaseTXN *base, SenderDataType &sender)
-    {
-        std::string sc_auth = "sc_" + sender.current_smart_contract_instance;
-        base->mutable_public_key()->set_smart_contract_auth(sc_auth);
-
-        base->set_fee_amount("100000000000");
-        base->set_fee_id("$ZRA+0000");
-        base->set_safe_send(false);
-        base->mutable_timestamp()->set_seconds(sender.block_time);
-    }
-
 
     void set_auth(zera_txn::TransferAuthentication *auth, SenderDataType &sender)
     {
@@ -222,7 +187,7 @@ namespace
         block_txns.ParseFromString(value);
         std::string fee_address = sender.fee_address;
         
-        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, fee_address, true);
+        ZeraStatus status = proposing::unpack_process_wrapper(&txn, &block_txns, zera_txn::TRANSACTION_TYPE::COIN_TYPE, false, fee_address, true, sender.txn_hash, sender.fee_smart_contract_wallet);
 
         if (status.ok())
         {
@@ -252,8 +217,8 @@ namespace
         {
             return "FAILED: Did not calculate contract fee";
         }
-
-        calc_fee(&txn);
+        uint256_t txn_fee_amount;
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
         base->set_hash(hash);
@@ -278,7 +243,8 @@ namespace
             return "FAILED: Did not calculate contract fee";
         }
 
-        calc_fee(&txn);
+        uint256_t txn_fee_amount;
+        calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
         base->set_hash(hash);
@@ -295,7 +261,7 @@ WasmEdge_Result Hold(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -305,48 +271,27 @@ WasmEdge_Result Hold(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[Hold] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-        amount = amount_temp;
-    }
-    else
-    {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
 
-    std::string status = create_transfer(sender, contract_id, amount);
-    std::string fee_address = sender.fee_address;
+    if (!is_valid_uint256(amount))
+    {
+        logging::print("[Hold] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Terminate;
+    }
+
+    std::string status = create_transfer(*sender, contract_id, amount);
     std::string result = status;
     const char *val = result.c_str();
     const size_t len = result.length();
@@ -362,7 +307,7 @@ WasmEdge_Result CurrentHold(void *Data, const WasmEdge_CallingFrameContext *Call
      * Params: {i32, i32, i32, i32, i32, i32, i32}
      * Returns: {i32}
      */
-    SenderDataType sender = *(SenderDataType *)Data;
+    SenderDataType* sender = (SenderDataType *)Data;
 
     uint32_t ContractPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t ContractSize = WasmEdge_ValueGetI32(In[1]);
@@ -372,47 +317,32 @@ WasmEdge_Result CurrentHold(void *Data, const WasmEdge_CallingFrameContext *Call
 
     uint32_t TargetPointer = WasmEdge_ValueGetI32(In[4]);
 
-    std::vector<unsigned char> ContractKey(ContractSize);
-    std::vector<unsigned char> AmountKey(AmountSize);
-
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
-    WasmEdge_Result Res = WasmEdge_MemoryInstanceGetData(MemCxt, ContractKey.data(), ContractPointer, ContractSize);
-
     std::string contract_id;
-    if (WasmEdge_ResultOK(Res))
+    if (!read_wasm_param(MemCxt, ContractPointer, ContractSize, contract_id))
     {
-        std::string contract_temp(reinterpret_cast<char *>(ContractKey.data()), ContractSize);
-        contract_id = contract_temp;
-    }
-    else
-    {
-        return Res;
+        return WasmEdge_Result_Terminate;
     }
 
-    WasmEdge_Result Res2 = WasmEdge_MemoryInstanceGetData(MemCxt, AmountKey.data(), AmountPointer, AmountSize);
     std::string amount;
-    if (WasmEdge_ResultOK(Res2))
+    if (!read_wasm_param(MemCxt, AmountPointer, AmountSize, amount))
     {
-        std::string amount_temp(reinterpret_cast<char *>(AmountKey.data()), AmountSize);
-
-        if (!is_valid_uint256(amount_temp))
-        {
-            std::string result = "[Hold] FAILED: Invalid uint256";
-            const char *val = result.c_str();
-            const size_t len = result.length();
-            WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
-            Out[0] = WasmEdge_ValueGenI32(len);
-            return WasmEdge_Result_Fail;
-        }
-        amount = amount_temp;
-    }
-    else
-    {
-        return Res2;
+        return WasmEdge_Result_Terminate;
     }
 
-    std::string status = current_create_transfer(sender, contract_id, amount);
+    if (!is_valid_uint256(amount))
+    {
+        std::string result = "[Hold] FAILED: Invalid uint256";
+        const char *val = result.c_str();
+        const size_t len = result.length();
+        WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+        Out[0] = WasmEdge_ValueGenI32(len);
+        logging::print("[CurrentHold] FAILED: Invalid uint256", true);
+        return WasmEdge_Result_Fail;
+    }
+
+    std::string status = current_create_transfer(*sender, contract_id, amount);
     std::string result = status;
     const char *val = result.c_str();
     const size_t len = result.length();

@@ -73,8 +73,13 @@ namespace
             logging::print("Block batch size: " + std::to_string(block_batch->blocks().size()), true);
             for (auto block : block_batch->blocks())
             {
+                if(db_hash_index::exist(std::to_string(block.block_header().block_height())))
+                {
+                    return ZeraStatus(ZeraStatus::Code::BLOCKCHAIN_DUPLICATE_ERROR);
+                }
                 logging::print("Processing block with height: " + std::to_string(block.block_header().block_height()), true);
                 status = ValidateBlock::process_block_from_sync(block);
+
                 if (!status.ok())
                 {
                     if(status.code() == ZeraStatus::Code::BLOCKCHAIN_DUPLICATE_ERROR)
@@ -168,7 +173,7 @@ grpc::Status ValidatorNetworkClient::SyncBlockchain(const BlockSync *request, st
 bool ValidatorNetworkClient::StartSyncBlockchain(bool seed_sync)
 {
 
-    logging::print("ValidatorNetworkClient::StartSyncBlockchain!!!");
+    logging::print("ValidatorNetworkClient::StartSyncBlockchain!");
     bool final_block = false;
     std::string last_key = "";
     zera_validator::BlockHeader last_header;
@@ -270,9 +275,6 @@ bool ValidatorNetworkClient::StartSyncBlockchain(bool seed_sync)
         logging::print("Failed to sync blockchain after 4 attempts.", false);
         return false;
     }
-
-    //TODO: remove log
-    logging::print("Blockchain synced successfully.");
 
     return true;
 }

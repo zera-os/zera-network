@@ -38,7 +38,7 @@ namespace
         int byte_size = contract.coin_denomination().amount().size() + wallet_adr.size() + contract.contract_id().size();
 
         // calculate the fees that need to be paid, and verify they have authorized enough coin to pay it
-        status = zera_fees::calculate_fees(usd_equiv, fee_type, byte_size, auth_fees, txn_fee_amount, contract.coin_denomination().amount());
+        status = zera_fees::calculate_fees(usd_equiv, fee_type, byte_size, auth_fees, txn_fee_amount, contract.coin_denomination().amount(), contract.contract_id());
 
         if (!status.ok())
         {

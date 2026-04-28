@@ -91,7 +91,7 @@ namespace
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::ExpenseRatioTXN>(const zera_txn::ExpenseRatioTXN *txn, zera_txn::TXNStatusFees &status_fees, zera_txn::ExpenseRatioResult *result, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::ExpenseRatioTXN>(const zera_txn::ExpenseRatioTXN *txn, zera_txn::TXNStatusFees &status_fees, zera_txn::ExpenseRatioResult *result, const zera_txn::TRANSACTION_TYPE &txn_type, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     uint64_t nonce = txn->base().nonce();
 
@@ -108,7 +108,7 @@ ZeraStatus block_process::process_txn<zera_txn::ExpenseRatioTXN>(const zera_txn:
         return status;
     }
 
-    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address);
+    status = zera_fees::process_simple_fees(txn, status_fees, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address, sc_txn, sc_fee_address);
     
     if (!status.ok())
     {

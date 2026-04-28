@@ -330,12 +330,17 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
 {
 
     bool bridge = false;
+    bool zera_dex = false;
 
     if (txn->base().public_key().has_smart_contract_auth())
     {
-        if (txn->base().public_key().smart_contract_auth() == "sc_bridge_proxy_1")
+        if (txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1")
         {
             bridge = true;
+        }
+        else if(txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_v1_1")
+        {
+            zera_dex = true;
         }
     }
 
@@ -380,7 +385,7 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
 
         for (auto id : txn->contract_fees().allowed_fee_instrument())
         {
-            if (id == "$ZRA+0000")
+            if (id == NETWORK_CONTRACT)
             {
                 zra_found = true;
                 break;
@@ -414,7 +419,7 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
         return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_contract.cpp: check_parameters: Restricted symbol", zera_txn::TXN_STATUS::RESTRICTED_SYMBOL);
     }
 
-    if (!bridge)
+    if (!bridge && !zera_dex)
     {
         std::regex symbol_pattern("^[A-Z0-9]*$");
         std::regex name_pattern("^[A-Za-z0-9 ]*$");
@@ -435,12 +440,16 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_contract.cpp: check_parameters: Contract ID does match required pattern. " + txn->contract_id(), zera_txn::TXN_STATUS::INVALID_CONTRACT_PARAMETERS);
         }
     }
-    status = check_governance(txn, bridge);
-
-    if (!status.ok())
+    if(!zera_dex)
     {
-        return status;
+        status = check_governance(txn, bridge);
+
+        if (!status.ok())
+        {
+            return status;
+        }
     }
+
     switch (txn->type())
     {
     case zera_txn::CONTRACT_TYPE::TOKEN:
@@ -512,7 +521,7 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
 
     if (status.ok())
     {
-        if (!bridge)
+        if (!bridge && !zera_dex)
         {
             contract_price_tracker::update_price(txn->contract_id());
         }

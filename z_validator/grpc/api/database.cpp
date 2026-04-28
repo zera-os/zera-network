@@ -36,7 +36,10 @@ grpc::Status APIImpl::RecieveRequestDatabase(grpc::ServerContext *context, const
             }
             case zera_api::DATABASE_TYPE::SMART_CONTRACTS:
             {
-                db_smart_contracts::get_single(request->key(), data);
+                if(!db_smart_contract_states::get_single(request->key(), data))
+                {
+                    db_smart_contracts::get_single(request->key(), data); 
+                }
                 break;
             }
             case zera_api::DATABASE_TYPE::VALIDATORS:
@@ -82,14 +85,10 @@ grpc::Status APIImpl::RecieveRequestDatabase(grpc::ServerContext *context, const
             case zera_api::DATABASE_TYPE::CURRENCY_EQUIVALENTS:
             {
                 uint256_t cur_data;
-                if(!zera_fees::get_cur_equiv(request->key(), cur_data))
-                {
-                    data = "0";
-                }
-                else
-                {
-                    data = cur_data.str();
-                }
+                zera_fees::get_cur_equiv(request->key(), cur_data);
+
+                data = cur_data.str();
+                
                 break;
             }
             case zera_api::DATABASE_TYPE::EXPENSE_RATIO:

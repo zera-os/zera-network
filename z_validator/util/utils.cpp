@@ -16,6 +16,7 @@
 #include "../logging/logging.h"
 #include "db_base.h"
 #include "base58.h"
+#include "sc_base64.h"
 
 namespace
 {
@@ -100,6 +101,69 @@ namespace
 
         return hash_fee;
     }
+
+    uint256_t get_multiplier(const std::string &term)
+    {
+        if(term == "6_months")
+        {
+            return 115;
+        }
+        else if(term == "1_year")
+        {
+            return 130;
+        }
+        else if(term == "2_years")
+        {
+            return 145;
+        }
+        else if(term == "3_years")
+        {
+            return 160;
+        }
+        else if(term == "4_years")
+        {
+            return 175;
+        }
+        else if(term == "5_years")
+        {
+            return 200;
+        }
+        else if(term == "liquid")
+        {
+            return 105;
+        }
+
+        return 100;
+    }
+
+    uint256_t get_instant_stake_coins(const std::string &wallet_address)
+    {
+
+        uint256_t staked_coins = 0;
+    
+        std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "INSTANT_STAKES__" + wallet_address;
+    
+        std::string wallet_stake_data;
+    
+        if(!db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
+        {
+            return 0;
+        }
+
+        AllWalletInstantStakes all_wallet_stakes = decode_all_wallet_instant_stakes(wallet_stake_data);
+    
+        for(auto stake : all_wallet_stakes.staker_states)
+        {
+            InstantStake wallet_stake = stake.second;
+            std::string term = wallet_stake.term;
+    
+            uint256_t multiplier = get_multiplier(term);
+    
+            staked_coins += (wallet_stake.principle * multiplier) / 100;
+        }    
+    
+        return staked_coins;
+    }
 }
 
 uint256_t get_key_fee(const zera_txn::PublicKey &pk)
@@ -148,15 +212,15 @@ uint256_t get_key_fee(const zera_txn::PublicKey &pk)
 bool is_restricted_symbol(const std::string &symbol)
 {
     std::string restricted_symbols_sc;
-    if(!db_smart_contracts::get_single(RESTRICTED_PROXY, restricted_symbols_sc) || restricted_symbols_sc == "")
+    if(!db_smart_contract_states::get_single(RESTRICTED_PROXY, restricted_symbols_sc) || restricted_symbols_sc == "")
     {
         return false;
     }
 
-    restricted_symbols_sc += "_" + symbol;
+    restricted_symbols_sc += "<>" + symbol;
     std::string restricted_symbols_data;
 
-    if(db_smart_contracts::get_single(restricted_symbols_sc, restricted_symbols_data) && restricted_symbols_data == "true")
+    if(db_smart_contract_states::get_single(restricted_symbols_sc, restricted_symbols_data) && restricted_symbols_data == "true")
     {
         return true;
     }
@@ -170,7 +234,7 @@ uint256_t get_fee(const std::string &fee_type)
 {
     std::string fee_key;
 
-    if(!db_smart_contracts::get_single(NETWORK_FEE_PROXY, fee_key) || fee_key == "")
+    if(!db_smart_contract_states::get_single(NETWORK_FEE_PROXY, fee_key) || fee_key == "")
     {
         if(fee_type == "VALIDATOR_FEE_PERCENTAGE")
         {
@@ -188,15 +252,23 @@ uint256_t get_fee(const std::string &fee_type)
         {
             return VALIDATOR_REGISTRATION_TXN_FEE;
         }
+        else if(fee_type == FIRST_TIME_WALLET_FEE)
+        {
+            return uint256_t(FIRST_TIME_WALLET_FEE_VALUE);
+        }
+        else if(fee_type == TOKEN_MULTIPLIER)
+        {
+            return TOKEN_MULTIPLIER_VALUE;
+        }
 
         return 1;
     }
 
 
-    fee_key += "_" + fee_type;
+    fee_key += "<>" + fee_type;
 
     std::string fee_data;
-    if(!db_smart_contracts::get_single(fee_key, fee_data) || fee_data == "")
+    if(!db_smart_contract_states::get_single(fee_key, fee_data) || fee_data == "")
     {
         if(fee_type == "VALIDATOR_FEE_PERCENTAGE")
         {
@@ -209,6 +281,14 @@ uint256_t get_fee(const std::string &fee_type)
         else if(fee_type == "TREASURY_FEE_PERCENTAGE")
         {
             return TREASURY_FEE_PERCENTAGE;
+        }
+        else if(fee_type == FIRST_TIME_WALLET_FEE)
+        {
+            return uint256_t(FIRST_TIME_WALLET_FEE_VALUE);
+        }
+        else if(fee_type == TOKEN_MULTIPLIER)
+        {
+            return TOKEN_MULTIPLIER_VALUE;
         }
 
         return 1;
@@ -224,15 +304,15 @@ uint256_t get_txn_fee(const zera_txn::TRANSACTION_TYPE &txn_type)
     std::string txn_type_name = zera_txn::TRANSACTION_TYPE_Name(txn_type);
 
     std::string fee_key;
-    if(!db_smart_contracts::get_single(NETWORK_FEE_PROXY, fee_key) || fee_key == "")
+    if(!db_smart_contract_states::get_single(NETWORK_FEE_PROXY, fee_key) || fee_key == "")
     {
         return 1;
     }
 
-    fee_key += "_" + txn_type_name;
+    fee_key += "<>" + txn_type_name;
 
     std::string fee_data;
-    if(!db_smart_contracts::get_single(fee_key, fee_data) || fee_data == "")
+    if(!db_smart_contract_states::get_single(fee_key, fee_data) || fee_data == "")
     {
         return 1;
     }
@@ -248,7 +328,8 @@ uint256_t get_txn_fee_contract(const zera_txn::TRANSACTION_TYPE &txn_type, const
     {
     case zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE:
     {
-        if (txn->base().public_key().has_smart_contract_auth() && txn->base().public_key().smart_contract_auth() == "sc_bridge_proxy_1")
+        if (txn->base().public_key().has_smart_contract_auth() && (txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1"
+        || txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_v1_1"))
         {
             return get_fee("CONTRACT_TXN_FEE");
         }
@@ -352,15 +433,15 @@ uint256_t get_circulating_supply(const std::string &contract_id)
     std::string circulating_supply_contract;
     std::string whitelist_wallets;
 
-    if(!db_smart_contracts::get_single(CIRCULATING_SUPPLY_CONTRACT, circulating_supply_contract) || circulating_supply_contract == "")
+    if(!db_smart_contract_states::get_single(CIRCULATING_SUPPLY_CONTRACT, circulating_supply_contract) || circulating_supply_contract == "")
     {
         return circ_supply;
     }
     
-    circulating_supply_contract += "_WHITE_LIST_NETWORK";
+    circulating_supply_contract += "<>WHITE_LIST_NETWORK";
 
 
-    if(!db_smart_contracts::get_single(circulating_supply_contract, whitelist_wallets) || whitelist_wallets == "")
+    if(!db_smart_contract_states::get_single(circulating_supply_contract, whitelist_wallets) || whitelist_wallets == "")
     {
         return circ_supply;
     }
@@ -386,3 +467,39 @@ uint256_t get_circulating_supply(const std::string &contract_id)
 
     return circ_supply - whitelist_amount;
 }
+
+uint256_t get_staked_coins(const std::string &contract_id, const std::string &wallet_address)
+{
+
+    if(contract_id != NETWORK_CONTRACT)
+    {
+        return 0;
+    }
+    uint256_t staked_coins = 0;
+    std::string wallet_base58 = base58_encode(wallet_address);
+    std::string wallet_stake_key = STAKING_PROXY_CONTRACT + "WALLET_STAKE__" + wallet_base58;
+
+    std::string wallet_stake_data;
+
+    if(db_smart_contract_states::get_single(wallet_stake_key, wallet_stake_data))
+    {
+        AllWalletStakes all_wallet_stakes = decode_all_wallet_stakes(wallet_stake_data);
+
+        for(auto stake : all_wallet_stakes.staker_states)
+        {
+            WalletStake wallet_stake = stake.second;
+            std::string term = wallet_stake.term;
+    
+            uint256_t multiplier = get_multiplier(term);
+    
+            staked_coins += (wallet_stake.principle * multiplier) / 100;
+        }
+    
+        staked_coins += (all_wallet_stakes.liquid_stake.principle * 105) / 100;
+    }
+
+    staked_coins += get_instant_stake_coins(wallet_base58);
+
+    return staked_coins;
+}
+

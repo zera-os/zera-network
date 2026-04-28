@@ -24,6 +24,17 @@ service APIService{
     rpc SmartContractEvents(SmartContractEventsResponse) returns (google.protobuf.Empty);
     rpc Contract(ContractRequest) returns (ContractResponse);
     rpc SmartContractEventsSearch(SmartContractEventsSearchRequest) returns (SmartContractEventsSearchResponse);
+    rpc TotalBalance(TotalBalanceRequest) returns (TotalBalanceResponse);
+    rpc GetAllAuthorizedFees(google.protobuf.Empty) returns (GetAllAuthorizedFeesResponse);
+}
+
+message GetAllAuthorizedFeesResponse{
+    repeated AuthorizedFee authorized_fees = 1;
+}
+message AuthorizedFee{
+    string contract_id = 1;
+    string allowed_fees = 2;
+    string used_fees = 3;
 }
 
 enum CONFIRMATION_LEVEL{
@@ -59,6 +70,14 @@ enum PROPOSAL_TYPE{
     LEDGER_BY_ID = 3;
 }
 
+//TOTAL BALANCE
+message TotalBalanceRequest{
+    bytes wallet_address = 1;
+    bool encoded = 2;
+}
+message TotalBalanceResponse{
+    repeated BalanceResponse balances = 1;
+}
 //PROPOSAL LEDGER
 message ProposalLedgerRequest{
     DATABASE_TYPE type = 1;
@@ -143,6 +162,7 @@ message BaseFeeRequest{
 message BaseFeeResponse{
     string key_fee = 1;     //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
     string byte_fee = 2;    //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
+    string new_wallet_fee = 3; //1000000000000000000 = $1.00 (1,000,000,000,000,000,000)
 }
 
 
@@ -153,7 +173,8 @@ message TokenFeeInfo{
     bool authorized = 3;
     string denomination = 4;
     optional zera_txn.ContractFees contract_fees = 5;
-
+    string allowed_fees = 6;
+    string used_fees = 7;
 }
 message TokenFeeInfoRequest{
     repeated string contract_ids = 1;
@@ -214,7 +235,7 @@ message SmartContractEventsResponse{
     uint64 gas_approved = 4; //
     string storage_fee = 5; //
     zera_txn.PublicKey caller = 6; //
-    bytes event_data = 7; //
+    repeated string event_data = 7; //
     string function = 8; //
     uint64 block_height = 9; //
     google.protobuf.Timestamp timestamp = 10; // block timestamp

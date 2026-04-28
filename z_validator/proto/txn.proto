@@ -27,6 +27,7 @@ service TXNService{
     rpc Compliance(ComplianceTXN) returns (google.protobuf.Empty);
     rpc BurnSBT(BurnSBTTXN) returns (google.protobuf.Empty);
     rpc Allowance(AllowanceTXN) returns (google.protobuf.Empty);
+    rpc ProposalCancel(ProposalCancelTXN) returns (google.protobuf.Empty);
 }
 
 enum TXN_STATUS{
@@ -72,6 +73,8 @@ enum TXN_STATUS{
     FAULTY_TXN = 39;
     OUT_OF_GAS = 40;
     INVALID_ALLOWANCE = 41;
+    SMART_CONTRACT_PANIC = 42;
+    SMART_CONTRACT_CRASH = 43;
 }
 enum TRANSACTION_TYPE
 {
@@ -98,7 +101,8 @@ enum TRANSACTION_TYPE
     SBT_BURN_TYPE = 20;
     REQUIRED_VERSION = 21;
     SMART_CONTRACT_INSTANTIATE_TYPE = 22;
-    ALLOWANCE_TYPE = 23;        //CHANGE - Allowance transaction type
+    ALLOWANCE_TYPE = 23;       
+    PROPOSAL_CANCEL_TYPE = 24;
 }
 //ENUMS
 enum LANGUAGE{
@@ -138,6 +142,11 @@ enum CONTRACT_TYPE{
     TOKEN = 0;
     NFT = 1;
     SBT = 2;
+}
+message ProposalCancelTXN{
+    BaseTXN base = 1;
+    string contract_id = 2;
+    bytes proposal_id = 3;
 }
 message DelegateContract{
     int32 priority= 1;
@@ -449,6 +458,11 @@ message GovernanceProposal{
     optional google.protobuf.Timestamp start_timestamp = 7;
     optional google.protobuf.Timestamp end_timestamp = 8;
     repeated GovernanceTXN governance_txn = 9;
+    repeated GovernanceOptionTXNS governance_option_txns = 10;
+}
+message GovernanceOptionTXNS{
+    repeated GovernanceTXN governance_txn = 1;
+    int32 option_index = 2;
 }
 message GovernanceTXN{
     TRANSACTION_TYPE txn_type = 1;
@@ -579,6 +593,7 @@ message TXNS{
     repeated SmartContractInstantiateTXN smart_contract_instantiate_txns = 25;
     optional RequiredVersion required_version_txn = 26;
     repeated AllowanceTXN allowance_txns = 27;
+    repeated ProposalCancelTXN proposal_cancel_txns = 28;
 }
 
 message Token{
@@ -592,6 +607,12 @@ message TokenFees{
 message DelegatedData{
     bytes address = 1;
     Token fee = 2;
+}
+message NestedResult{
+    string smart_contract_name = 1;
+    uint32 smart_contract_instance = 2;
+    string function = 3;
+    repeated string emits = 4;
 }
 message TXNStatusFees{
     bytes txn_hash = 1;
@@ -608,6 +629,8 @@ message TXNStatusFees{
     repeated DelegatedData delegated_data = 14;
     optional string interface_fee = 15;
     optional string interface_fee_id = 16;
+    repeated NestedResult nested_results = 17;
+    optional bytes root_hash = 18; //root hash of the smart contract
 }
 message ProposalContract
 {
@@ -641,6 +664,7 @@ message TXNWrapper{
         RequiredVersion required_version_txn = 21;
         SmartContractInstantiateTXN smart_contract_instantiate_txn = 22;
         AllowanceTXN allowance_txn = 23;
+        ProposalCancelTXN proposal_cancel_txn = 28;
     }
     
     TRANSACTION_TYPE txn_type = 24;

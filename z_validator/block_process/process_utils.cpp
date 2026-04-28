@@ -27,7 +27,6 @@ ZeraStatus block_process::get_sender_wallet(const std::string &sender_key, uint2
   
     if (!db_processed_wallets::get_single(sender_key, wallet_balance))
     {
-        logging::print("sender_key: ", sender_key, true);
         if (!db_wallets::get_single(sender_key, wallet_balance))
         {
             return ZeraStatus(ZeraStatus::Code::WALLET_ERROR, "process_utils.cpp: get_sender_wallet: Sender wallet does not exist: ", zera_txn::TXN_STATUS::INSUFFICIENT_AMOUNT);

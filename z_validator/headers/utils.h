@@ -18,3 +18,4 @@ uint256_t get_txn_fee(const zera_txn::TRANSACTION_TYPE &txn_type);
 std::string get_txn_key(uint64_t nonce, std::string hash);
 uint256_t get_circulating_supply(const std::string &contract_id);
 bool is_restricted_symbol(const std::string &symbol);
+uint256_t get_staked_coins(const std::string &contract_id, const std::string &wallet_address);

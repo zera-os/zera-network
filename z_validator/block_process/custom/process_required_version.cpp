@@ -11,7 +11,7 @@
 #include "../../logging/logging.h"
 
 template <>
-ZeraStatus block_process::process_txn<zera_txn::RequiredVersion>(const zera_txn::RequiredVersion *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::RequiredVersion>(const zera_txn::RequiredVersion *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
 
     if(!txn->base().public_key().has_governance_auth())
@@ -21,7 +21,7 @@ ZeraStatus block_process::process_txn<zera_txn::RequiredVersion>(const zera_txn:
     std::string key = wallets::get_public_key_string(txn->base().public_key());
 
     //change log
-    if(key != "gov_$ZRA+0000" && key != "gov_$ZIP+0000")
+    if(key != NETWORK_GOVERNANCE && key != IMPROVEMENT_GOVERNANCE)
     {
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_required_version.cpp: check_restricted: Governance auth from ZRA is required.", zera_txn::TXN_STATUS::INVALID_TXN_DATA);
     }

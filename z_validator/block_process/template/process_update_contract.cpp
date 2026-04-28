@@ -239,7 +239,7 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
     logging::log("process_update_contract.cpp: check_parameters: ContractUpdateTXN");
     std::string base_pub_key = wallets::get_public_key_string(txn->base().public_key());
     HashType type = wallets::get_wallet_type(base_pub_key);
-    if (wallets::get_wallet_type(base_pub_key) != HashType::wallet_r && wallets::get_wallet_type(base_pub_key) != HashType::wallet_g)
+    if (type != HashType::wallet_r && type != HashType::wallet_g && type != HashType::wallet_sc)
     {
         return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_update_contract.cpp: check_parameters: sender key is not restricted", zera_txn::TXN_STATUS::INVALID_AUTH_KEY);
     }
@@ -270,8 +270,8 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
     }
     if (txn->has_name())
     {
-        std::regex name_pattern("^[A-Za-z0-9 ]");
-
+        std::regex name_pattern("^[A-Za-z0-9 ]*$");
+        
         if (txn->name().size() < 3 || txn->name().size() > 200 || !std::regex_match(txn->name(), name_pattern))
         {
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_update_contract.cpp: check_parameters: Contract name is either too big or too small.", zera_txn::TXN_STATUS::INVALID_CONTRACT_PARAMETERS);
@@ -352,14 +352,12 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
         for (auto key : contract.restricted_keys())
         {
             std::string key_str = wallets::get_public_key_string(key.public_key());
-            logging::print("original", key_str, true);
             logging::print(std::to_string(key.key_weight()));
             bool removed = true;
 
             for (auto added_key : added_keys)
             {
                 std::string added_key_str = wallets::get_public_key_string(added_key.public_key());
-                logging::print("new", added_key_str, true);
                 logging::print(std::to_string(added_key.key_weight()));
                 if (added_key_str == key_str)
                 {

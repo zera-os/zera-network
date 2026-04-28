@@ -68,11 +68,16 @@ public:
     grpc::Status ValidatorCoin(grpc::ServerContext *context, const zera_txn::CoinTXN *request, google::protobuf::Empty *response) override;
     grpc::Status ValidatorSmartContractInstantiate(grpc::ServerContext *context, const zera_txn::SmartContractInstantiateTXN *request, google::protobuf::Empty *response) override;
     grpc::Status ValidatorAllowance(grpc::ServerContext *context, const zera_txn::AllowanceTXN *request, google::protobuf::Empty *response) override;
+    grpc::Status ValidatorProposalCancel(grpc::ServerContext *context, const zera_txn::ProposalCancelTXN *request, google::protobuf::Empty *response) override;
 
     grpc::Status IndexerVoting(grpc::ServerContext *context, const zera_validator::IndexerVotingRequest *request, zera_validator::IndexerVotingResponse *response) override;
     grpc::Status Nonce(grpc::ServerContext *context, const zera_validator::NonceRequest *request, zera_validator::NonceResponse *response) override;
     grpc::Status Balance(grpc::ServerContext *context, const zera_validator::BalanceRequest *request, zera_validator::BalanceResponse *response) override;
     grpc::Status Gossip(grpc::ServerContext *context, const zera_validator::TXNGossip *request, google::protobuf::Empty *response) override;
+
+    // Checkpoint sync for new validators
+    grpc::Status GetCheckpointInfo(grpc::ServerContext *context, const zera_validator::CheckpointInfoRequest *request, zera_validator::CheckpointInfo *response) override;
+    grpc::Status StreamCheckpoint(grpc::ServerContext *context, const zera_validator::CheckpointRequest *request, grpc::ServerWriter<zera_validator::CheckpointChunk> *writer) override;
 
     template <typename TXType>
     static void ProcessGossipTXN(const TXType *request, std::string client_ip);
@@ -180,29 +185,9 @@ private:
     static void ProcessRequest(const TXType *request, std::string client_ip)
     {
 
-        ZeraStatus status = verify_txns::verify_txn(request);
-        std::string memo = "";
-
-        if (request->base().has_memo())
-        {
-            memo = request->base().memo();
-        }
-
-        if (!status.ok())
-        {
-            status.prepend_message("validator_network_service_grpc.h: ProcessRequestAsync: " + memo);
-
-            if (status.code() != ZeraStatus::Code::DUPLICATE_TXN_ERROR)
-            {
-                rate_limiter.processUpdate(client_ip, true);
-                logging::print(status.read_status());
-            }
-
-            return;
-        }
 
         zera_txn::TRANSACTION_TYPE txn_type;
-        status = verify_txns::store_txn(request, txn_type);
+        ZeraStatus status = verify_txns::store_txn(request, txn_type);
 
         // if (txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_REGISTRATION_TYPE && txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_HEARTBEAT_TYPE)
         // {
@@ -218,14 +203,6 @@ private:
         //     }
         // }
 
-        // if txn was stored start gossip
-        if (!status.ok())
-        {
-            rate_limiter.processUpdate(client_ip, true);
-            status.prepend_message("validator_network_service_grpc.h: ProcessRequestAsync: " + memo);
-            logging::print(status.read_status());
-            return;
-        }
 
         TXType *txn = new TXType();
         txn->CopyFrom(*request);

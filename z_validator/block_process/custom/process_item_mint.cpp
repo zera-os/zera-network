@@ -113,7 +113,7 @@ namespace
     }
 }
 template <>
-ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn::ItemizedMintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn)
+ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn::ItemizedMintTXN *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed, const std::string &fee_address, bool sc_txn, const std::string &sc_fee_address)
 {
     uint64_t nonce = txn->base().nonce();
     ZeraStatus status;
@@ -147,13 +147,24 @@ ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn:
     uint256_t byte_multiplier(get_txn_fee(zera_txn::TRANSACTION_TYPE::ITEM_MINT_TYPE));
     // calculate the fees that need to be paid, and verify they have authorized enough coin to pay it
     uint256_t txn_fee_amount;
-    status = zera_fees::calculate_fees(usd_equiv, byte_multiplier, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, fee_contract.coin_denomination().amount(), txn->base().public_key());
+    status = zera_fees::calculate_fees(usd_equiv, byte_multiplier, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, fee_contract.coin_denomination().amount(), txn->base().public_key(), fee_contract.contract_id());
 
     if (!status.ok())
     {
         return status;
     }
-    std::string sender_adr = wallets::generate_wallet(txn->base().public_key());
+    
+    //CHANGELOG: added sc_fee address for sc_txns
+    std::string sender_adr;
+    if(sc_txn)
+    {
+        sender_adr = sc_fee_address;
+    }
+    else
+    {
+        sender_adr = wallets::generate_wallet(txn->base().public_key());
+    }
+
     zera_txn::InstrumentContract contract;
     status = zera_fees::process_fees(contract, txn_fee_amount, sender_adr, fee_id, true, status_fees, txn->base().hash(), fee_address);
 

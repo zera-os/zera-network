@@ -57,6 +57,11 @@ void open_dbs()
     db_allowance::open_db();
     db_sc_subscriber::open_db();
     db_event_management::open_db();
+    db_staked_coins_voted_temp::open_db();
+    db_staked_coins_voted::open_db();
+    db_fee_tokens::open_db();
+    db_fee_tokens_temp::open_db();
+    db_smart_contract_states::open_db();
 
     std::string confirmed_height;
     if (!db_confirmed_blocks::get_single(CONFIRMED_BLOCK_LATEST, confirmed_height))
@@ -75,7 +80,9 @@ void open_dbs()
     db_wallets_temp::remove_all();
     db_gossip::remove_all();
     db_sc_temp::remove_all();
-    
+    db_staked_coins_voted_temp::remove_all();
+    db_fee_tokens_temp::remove_all();
+    db_sc_subscriber::remove_all();
 
     std::vector<std::string> keys;
     std::vector<std::string> values;
@@ -146,6 +153,11 @@ void close_dbs()
     db_allowance::close_db();
     db_sc_subscriber::close_db();
     db_event_management::close_db();
+    db_staked_coins_voted_temp::close_db();
+    db_staked_coins_voted::close_db();
+    db_fee_tokens::close_db();
+    db_fee_tokens_temp::close_db();
+    db_smart_contract_states::close_db();
 }
 
 void nuke_db()
@@ -203,4 +215,5 @@ void nuke_db()
     db_allowance::remove_all();
     db_sc_subscriber::remove_all();
     db_event_management::remove_all();
+    db_smart_contract_states::remove_all();
 }

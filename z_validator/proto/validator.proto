@@ -44,6 +44,21 @@ service ValidatorService{
     rpc Balance(BalanceRequest) returns (BalanceResponse);
     rpc Gossip(TXNGossip) returns (google.protobuf.Empty);
     rpc ValidatorAllowance(zera_txn.AllowanceTXN) returns (google.protobuf.Empty);
+    rpc ValidatorProposalCancel(zera_txn.ProposalCancelTXN) returns (google.protobuf.Empty);
+    
+    // Checkpoint sync for new validators
+    rpc GetCheckpointInfo(CheckpointInfoRequest) returns (CheckpointInfo);
+    rpc StreamCheckpoint(CheckpointRequest) returns (stream CheckpointChunk);
+}
+
+message FeeToken{
+    string stable_value_allowed = 1; //1000000000000000000 = $1.00
+    string rate = 2; //1000000000000000000 = $1.00
+    string value_used = 3; //1000000000000000000 = $1.00
+    optional string max_stake = 4; //1000000000000000000 = $1.0
+    bool authorized = 5; //true = authorized, false = not authorized
+    bool whitelisted = 6; //true = whitelisted, false = not whitelisted
+    string contract_id = 7; //contract_id of the token
 }
 
 message AllowanceState{
@@ -243,6 +258,7 @@ message Proposal{
     bool options_set = 15;
     uint32 number_of_options = 16;
     repeated zera_txn.GovernanceTXN governance_txn = 17;
+    repeated zera_txn.GovernanceOptionTXNS governance_option_txns = 18;
 }
 message ProposalWalletRecieve{
     zera_txn.BaseTXN base = 1;
@@ -261,7 +277,7 @@ message ProposalWalletSend{
 message CurrencyRate{
     bool qualified = 1;
     string rate = 2; //1000000000000000000 = $1.00
-    optional string max_stake = 3; //1000000000000000000 = $1.00
+    optional string max_stake = 3; //1000000000000000000 = $1.00 (10^18)
 }
 message ExpenseTracker{
     int32 day = 1;
@@ -401,4 +417,38 @@ message TXNGossip{
     repeated TXN txns = 1;
     zera_txn.PublicKey public_key = 2;
     optional bytes signature = 3;
+}
+
+// Checkpoint Sync Messages
+message CheckpointRequest {
+    string version = 1;                          // Version identifier (e.g., "v100002")
+    zera_txn.PublicKey public_key = 2;           // Requesting validator's public key
+    google.protobuf.Timestamp timestamp = 3;     // Request timestamp (prevents replay attacks)
+    bytes signature = 4;                         // Signature of (version + timestamp)
+}
+
+message CheckpointInfoRequest {
+    zera_txn.PublicKey public_key = 1;
+    google.protobuf.Timestamp timestamp = 2;     // Request timestamp (prevents replay attacks)
+    bytes signature = 3;                         // Signature of timestamp
+}
+
+message CheckpointInfo {
+    string version = 1;                          // Current checkpoint version
+    uint64 block_height = 2;                     // Block height at checkpoint
+    bytes block_hash = 3;                        // Block hash for verification
+    uint64 total_size = 4;                       // Total tar.gz file size in bytes
+    google.protobuf.Timestamp created_at = 5;    // When checkpoint was created
+}
+
+message CheckpointChunk {
+    bytes data = 1;                              // Raw tar.gz chunk data
+    uint64 offset = 2;                           // Byte offset in file
+    uint64 total_size = 3;                       // Total file size
+    bool is_last = 4;                            // Last chunk indicator
+}
+
+message KeyPair{
+    bytes public_key = 1;
+    bytes private_key = 2;
 }

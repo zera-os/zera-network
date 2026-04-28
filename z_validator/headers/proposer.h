@@ -129,7 +129,7 @@ public:
         return success;
     }
     template <typename TXType>
-    static ZeraStatus unpack_process_wrapper(TXType *txn, zera_txn::TXNS *block_txns, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed = false, const std::string &fee_address = "", bool sc_txn = false)
+    static ZeraStatus unpack_process_wrapper(TXType *txn, zera_txn::TXNS *block_txns, const zera_txn::TRANSACTION_TYPE &txn_type, bool timed = false, const std::string &fee_address = "", bool sc_txn = false, const std::string &sc_hash = "", const std::string &sc_fee_address = "")
     {
         ZeraStatus status;
         zera_txn::TXNStatusFees status_fee;
@@ -139,6 +139,11 @@ public:
         status_fee.set_smart_contract(sc_txn);
         std::string execute_key = "BLOCK_TXNS_" + txn_hash;
 
+        if(sc_txn)
+        {
+            status_fee.set_root_hash(sc_hash);
+        }
+
         if (txn_type == zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_EXECUTE_TYPE || (txn_type == zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_INSTANTIATE_TYPE))
         {
             db_smart_contracts::store_single(execute_key, block_txns->SerializeAsString());
@@ -147,7 +152,7 @@ public:
         if (!db_block_txns::get_single(txn_hash, value) || timed)
         {
 
-            status = block_process::process_txn(txn, status_fee, txn_type, timed, fee_address, sc_txn);
+            status = block_process::process_txn(txn, status_fee, txn_type, timed, fee_address, sc_txn, sc_fee_address);
             status.set_status(status_fee.status());
 
             if (status.ok())
@@ -201,14 +206,12 @@ public:
             db_smart_contracts::remove_single(execute_key);
             return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "Smart contract txn failed", zera_txn::TXN_STATUS::FAULTY_TXN);
         }
-
         db_smart_contracts::remove_single(execute_key);
-
         return status;
     }
 
     template <typename TXType>
-    static ZeraStatus unpack_process_wrapper(TXType *txn, zera_txn::TXNS *block_txns, bool expense_ratio, const std::string &fee_address = "", bool sc_txn = false)
+    static ZeraStatus unpack_process_wrapper(TXType *txn, zera_txn::TXNS *block_txns, bool expense_ratio, const std::string &fee_address = "", bool sc_txn = false, const std::string &sc_hash = "", const std::string &sc_fee_address = "")
     {
         ZeraStatus status;
         zera_txn::TXNStatusFees status_fee;
@@ -218,9 +221,14 @@ public:
 
         status_fee.set_smart_contract(sc_txn);
 
+        if(sc_txn)
+        {
+            status_fee.set_root_hash(sc_hash);
+        }
+
         if (!db_block_txns::get_single(txn_hash, value))
         {
-            status = block_process::process_txn(txn, status_fee, expense_results, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address, sc_txn);
+            status = block_process::process_txn(txn, status_fee, expense_results, zera_txn::TRANSACTION_TYPE::EXPENSE_RATIO_TYPE, fee_address, sc_txn, sc_fee_address);
             if (status.ok())
             {
 

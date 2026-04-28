@@ -206,8 +206,11 @@ namespace
         {
             hash_tokens.push_back(item);
         }
-        if (hash_tokens.size() < 0)
+        if (hash_tokens.size() == 0)
         {
+            // std::vector<uint8_t> public_key_vec(extract_pub_key.begin(), extract_pub_key.end());
+            // public_key_vec = hash_pk(HashType::hash_c, public_key_vec);
+            // return std::string(public_key_vec.begin(), public_key_vec.end());
             return "";
         }
 
@@ -295,12 +298,27 @@ namespace
                 wallet_address = wallet_address.substr(3);
             }
         }
+        else if (type == HashType::wallet_scd)
+        {
+            if (wallet_address.length() > 4)
+            {
+                wallet_address = wallet_address.substr(4);
+            }
+        }
         else
         {
             return "";
         }
-        auto vec = Hashing::sha256_hash(wallet_address);
-        std::string hash = std::string(vec.begin(), vec.end());
+        std::string hash;
+        if(type != HashType::wallet_scd)
+        {
+            auto vec = Hashing::sha256_hash(wallet_address);
+            hash = std::string(vec.begin(), vec.end());
+        }
+        else
+        {
+            hash = wallet_address;
+        }
 
         return hash + transfer_symbol;
     }
@@ -419,6 +437,10 @@ HashType wallets::get_wallet_type(std::string pub_key)
     {
         wallet_type = HashType::wallet_sc;
     }
+    else if (wallet_pref == "scd")
+    {
+        wallet_type = HashType::wallet_scd;
+    }
 
     return wallet_type;
 }
@@ -514,9 +536,9 @@ std::string wallets::generate_wallet_single(const std::string &public_key, const
     {
         hash_tokens.push_back(item);
     }
-    if (hash_tokens.size() <= 0)
+    if (hash_tokens.size() == 0)
     {
-        return "";
+        return extract_pub_key + transfer_symbol;
     }
 
     std::string wallet_adr = multi_hash(hash_tokens, extract_pub_key);
@@ -570,9 +592,6 @@ KeyPair wallets::generate_key_pair(KeyType key_type)
     // Convert the binary encoding of the public and private keys to vectors of uint8_t and return them
     key_pair.public_key = std::vector<uint8_t>(public_key_data.begin(), public_key_data.end());
     key_pair.private_key = std::vector<uint8_t>(private_key_data.begin(), private_key_data.end());
-
-    // Create a new signing context and initialize it with the private key
-    EVP_MD_CTX *mdctx = EVP_MD_CTX_new();
 
     // Free the resources used by the EVP_PKEY and EVP_PKEY_CTX objects
     EVP_PKEY_free(pkey);

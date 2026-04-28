@@ -57,8 +57,9 @@ namespace
 
         stored_proposal.set_fee(boost::lexical_cast<std::string>(wallet_amount));
         stored_proposal.set_stage(0);
-        stored_proposal.mutable_public_key()->set_single(proposal.base().public_key().single());
         stored_proposal.set_number_of_options(proposal.options_size());
+        stored_proposal.mutable_public_key()->CopyFrom(proposal.base().public_key());
+
     }
 
     void staggered(zera_txn::GovernanceProposal &proposal, zera_validator::Proposal &stored_proposal, zera_txn::InstrumentContract &contract, const uint64_t &block_time)
@@ -155,9 +156,78 @@ void txn_batch::batch_proposals(const zera_txn::TXNS &txns, const std::map<std::
                 }
             }
 
+            if (proposal.governance_option_txns_size() > 0)
+            {
+                for (auto option_txn : proposal.governance_option_txns())
+                {
+                    auto gov_option_txn = stored_proposal.add_governance_option_txns();
+                    gov_option_txn->CopyFrom(option_txn);
+                }
+            }
+
             logging::print("proposal_hash:", base58_encode(proposal.base().hash()));
             proposal_batch.Put(proposal.base().hash(), stored_proposal.SerializeAsString());
         }
     }
     db_proposals::store_batch(proposal_batch);
+}
+
+void txn_batch::batch_proposal_cancel(const zera_txn::TXNS &txns, const std::map<std::string, bool> &txn_passed)
+{
+    rocksdb::WriteBatch proposal_cancel_batch;
+    rocksdb::WriteBatch staked_coins_voted_batch;
+    rocksdb::WriteBatch process_adaptive_ledger_batch;
+    for (auto proposal_cancel : txns.proposal_cancel_txns())
+    {
+        if (txn_passed.at(proposal_cancel.base().hash()))
+        {
+            proposal_cancel_batch.Delete(proposal_cancel.proposal_id());
+            process_adaptive_ledger_batch.Delete(proposal_cancel.proposal_id());
+
+            zera_txn::InstrumentContract contract;
+            block_process::get_contract(proposal_cancel.contract_id(), contract);
+            if (contract.governance().type() == zera_txn::GOVERNANCE_TYPE::CYCLE || contract.governance().type() == zera_txn::GOVERNANCE_TYPE::STAGED)
+            {
+                std::string proposal_ledger_data;
+                zera_validator::ProposalLedger proposal_ledger;
+                if(db_proposal_ledger::get_single(proposal_cancel.contract_id(), proposal_ledger_data) && proposal_ledger.ParseFromString(proposal_ledger_data))
+                {
+                    int index_to_remove = -1;
+                    for (int i = 0; i < proposal_ledger.proposal_ids_size(); ++i)
+                    {
+                        if (proposal_ledger.proposal_ids(i) == proposal_cancel.proposal_id())
+                        {
+                            index_to_remove = i;
+                            break;
+                        }
+                    }
+                    if (index_to_remove != -1)
+                    {
+                        // Swap with last and remove last
+                        proposal_ledger.mutable_proposal_ids()->SwapElements(index_to_remove, proposal_ledger.proposal_ids_size() - 1);
+                        proposal_ledger.mutable_proposal_ids()->RemoveLast();
+                    }
+
+                    db_proposal_ledger::store_single(proposal_cancel.contract_id(), proposal_ledger.SerializeAsString());
+                }
+
+                std::vector<std::string> keys;
+                std::vector<std::string> values;
+                if(db_staked_coins_voted::find_by_prefix(proposal_cancel.proposal_id(), keys, values))
+                {
+                    int x = 0;
+                    while (x < keys.size())
+                    {
+                        std::string key = keys[x];
+                        staked_coins_voted_batch.Delete(key);
+                        x++;
+                    }
+                }
+            } 
+        }
+    }
+ 
+    db_process_adaptive_ledger::store_batch(process_adaptive_ledger_batch);
+    db_staked_coins_voted::store_batch(staked_coins_voted_batch);
+    db_proposals::store_batch(proposal_cancel_batch);
 }

@@ -279,8 +279,15 @@ void ValidatorNetworkClient::CheckAttestations(std::shared_ptr<zera_validator::B
 
         if (my_hash != block_support_vec[0].first)
         {
+
+            if(ValidatorConfig::get_shutdown())
+            {
+                logging::print("SHUTDOWN DETECTED");
+                return;
+            }
             logging::print("ATTEMPTING REORG");
             Reorg::reorg_blockchain();
+            
             ValidatorAPIClient::ClearPendingEventsForBlock(request->block_height());
         }
         else
@@ -418,7 +425,8 @@ void ValidatorNetworkClient::SendAttestation(const zera_validator::BlockAttestat
 
     // Enqueue the task into the thread pool
     ValidatorThreadPool::enqueueTask([all_data, request_copy]()
-                     { process_response_chunks(all_data, request_copy); });
+                     { 
+                        process_response_chunks(all_data, request_copy); });
 
     // Process response_chunk...
     // std::thread asyncProcessingThread(&process_response_chunks, all_data, request_copy);

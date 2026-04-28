@@ -21,7 +21,8 @@ enum class HashType {
 	wallet_r = 12,
 	wallet_g = 13,
 	wallet_sc = 14,
-	wallet_error = 15
+	wallet_error = 15,
+	wallet_scd = 16
 };
 
 namespace wallets {

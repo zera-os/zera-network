@@ -116,6 +116,7 @@ template void ValidatorNetworkClient::StartGossip<zera_txn::BurnSBTTXN>(const ze
 template void ValidatorNetworkClient::StartGossip<zera_txn::CoinTXN>(const zera_txn::CoinTXN *request);
 template void ValidatorNetworkClient::StartGossip<zera_txn::SmartContractInstantiateTXN>(const zera_txn::SmartContractInstantiateTXN *request);
 template void ValidatorNetworkClient::StartGossip<zera_txn::AllowanceTXN>(const zera_txn::AllowanceTXN *request);
+template void ValidatorNetworkClient::StartGossip<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *request);
 
 template <>
 void ValidatorNetworkClient::StartGossip<zera_validator::Block>(const zera_validator::Block *request)
@@ -331,5 +332,13 @@ void ValidatorNetworkClient::GRPCSend<zera_txn::AllowanceTXN>(const zera_txn::Al
 {
     std::unique_ptr<grpc::ClientAsyncResponseReader<Empty>> rpc(
         stubs_[call_num]->AsyncValidatorAllowance(context, *request, &cq_));
+    rpc->Finish(response, status, reinterpret_cast<void *>(static_cast<size_t>(call_num)));
+}
+
+template <>
+void ValidatorNetworkClient::GRPCSend<zera_txn::ProposalCancelTXN>(const zera_txn::ProposalCancelTXN *request, const int call_num, grpc::ClientContext *context, grpc::Status *status, Empty *response)
+{
+    std::unique_ptr<grpc::ClientAsyncResponseReader<Empty>> rpc(
+        stubs_[call_num]->AsyncValidatorProposalCancel(context, *request, &cq_));
     rpc->Finish(response, status, reinterpret_cast<void *>(static_cast<size_t>(call_num)));
 }
