@@ -894,8 +894,7 @@ WasmEdge_Result Emit(void *Data, const WasmEdge_CallingFrameContext *CallFrameCx
   if (!storage_fees(sender, storage_fee))
   {
     logging::print("[Emit] no storage fees Value: ", valueString, true);
-    Out[0] = WasmEdge_ValueGenI32(0);
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
 
   logging::print("[Emit] Value: ", valueString, true);
@@ -923,8 +922,7 @@ WasmEdge_Result EmitBlock(void *Data, const WasmEdge_CallingFrameContext *CallFr
   if (!storage_fees(sender, storage_fee))
   {
     logging::print("[EmitBlock] no storage fees Value: ", valueString, true);
-    Out[0] = WasmEdge_ValueGenI32(0);
-    return WasmEdge_Result_Success;
+    return WasmEdge_Result_Terminate;
   }
 
   logging::print("[EmitBlock] Value: ", valueString, true);
