@@ -1,6 +1,7 @@
 // Standard library headers
 #include <string>
 #include <iostream>
+#include <chrono>
 
 // Third-party library headers
 #include "validator.pb.h"
@@ -161,8 +162,28 @@ grpc::Status ValidatorServiceImpl::StreamBlockAttestation(grpc::ServerContext *c
     std::vector<zera_validator::DataChunk> chunks;
 
     // read attestation data from stream
+    // These chunks are buffered in full BEFORE parsing/signature verification, so cap
+    // total bytes, chunk count, and wall-clock time INSIDE the loop. Otherwise any peer
+    // that can reach the P2P port can stream data indefinitely (or trickle it slowloris
+    // style) and force unbounded allocation before validation runs (CWE-400).
+    size_t total_bytes = 0;
+    const auto stream_deadline = std::chrono::steady_clock::now() +
+                                 std::chrono::seconds(INBOUND_STREAM_DEADLINE_SECONDS);
     while (stream->Read(&chunk))
     {
+        total_bytes += chunk.chunk_data().size();
+
+        if (total_bytes > MAX_ATTESTATION_STREAM_BYTES ||
+            chunks.size() >= static_cast<size_t>(MAX_INBOUND_STREAM_CHUNKS) ||
+            std::chrono::steady_clock::now() > stream_deadline)
+        {
+            logging::print("StreamBlockAttestation: peer exceeded stream limits, aborting. bytes: " +
+                               std::to_string(total_bytes) + " chunks: " + std::to_string(chunks.size() + 1),
+                           false);
+            delete request;
+            return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, "attestation stream exceeded size/chunk/time limits");
+        }
+
         chunks.push_back(chunk);
     }
 

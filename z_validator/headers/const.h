@@ -3,8 +3,18 @@
 
 #include <string>
 #include <cstdlib>
+#include <cstdint>
 
-constexpr int VERSION = 100004; //version of the validator
+constexpr int VERSION = 100007; //version of the validator
+
+// Smart contract outflow allowance rollout gate.
+// When false (this build): a SmartContractExecuteTXN/InstantiateTXN with NO
+// allowance entry for a token allows unlimited user outflow of that token
+// (legacy behavior), letting the ecosystem adopt allowances gracefully. Flip to
+// true in a future build to enforce default-deny (no entry => zero outflow).
+// Network-wide consistency is guaranteed because all nodes run the same VERSION
+// (enforced via REQUIRED_VERSION).
+constexpr bool SC_ALLOWANCE_DEFAULT_DENY = false;
 //1000000000000000000 1 dollar
 //10000000000000000   1 cent
 //1 000 000 000 000 000 000 1 dollar
@@ -22,6 +32,53 @@ constexpr long ZERA_STAKE_PERCENTAGE = 500;       //50%
 constexpr long STAKED_MATH_MULTIPLIER = 100000;     //100%
 
 const size_t CHUNK_SIZE = 3.8 * 1024 * 1024; // 4MB
+
+// Bounds on a single block-sync response, enforced client-side BEFORE the streamed
+// data is buffered/verified. A legitimate response is at most BLOCK_SYNC (100) blocks;
+// even a worst-case full block (~1-2k txns) is on the order of ~1.5MB, so ~150MB is the
+// realistic maximum. 256MB gives large headroom while preventing a malicious sync peer
+// from streaming unbounded chunk data and exhausting the syncing validator's memory.
+constexpr size_t MAX_BLOCK_SYNC_RESPONSE_BYTES = 256ull * 1024 * 1024; // 256MB hard ceiling
+constexpr int MAX_BLOCK_SYNC_CHUNKS = 128;                             // secondary guard (CHUNK_SIZE each)
+constexpr int BLOCK_SYNC_DEADLINE_SECONDS = 60;                        // wall-clock cap per sync stream (anti-slowloris)
+
+// Bounds on inbound P2P streaming RPCs (StreamBlockAttestation / StreamBroadcast),
+// enforced server-side INSIDE the read loop, before the buffered payload is parsed
+// or signature-verified. Without these, any peer that can reach the P2P port can
+// stream chunks indefinitely and the validator buffers all of them in memory before
+// validation ever runs (CWE-400).
+//
+// Sizing: a BlockAttestation is a hash + validator-support list (KBs, ~1 chunk);
+// a broadcast Block is ~1.5MB worst case today. Caps are set with large headroom
+// so legitimate growth never trips them while still bounding a malicious stream.
+constexpr size_t MAX_ATTESTATION_STREAM_BYTES = 16ull * 1024 * 1024; // 16MB ceiling for attestation streams
+constexpr size_t MAX_BROADCAST_STREAM_BYTES = 64ull * 1024 * 1024;   // 64MB ceiling for a single broadcast block
+constexpr int MAX_INBOUND_STREAM_CHUNKS = 32;                        // secondary guard (CHUNK_SIZE each)
+constexpr int INBOUND_STREAM_DEADLINE_SECONDS = 30;                  // wall-clock cap per inbound stream (anti-slowloris)
+
+// Bounds on public API bulk endpoints (port 50053). The per-IP rate limiter
+// caps request COUNT (5/sec, burst 100) but not per-request cost; without
+// these caps a single request can make the validator scan, base58-encode and
+// ship entire column families or event histories (CWE-400).
+//
+// ProposalLedger: the response is capped just under gRPC's 4MB default client
+// max-receive size, so the server never builds a response a default client
+// couldn't accept anyway. Oversized ledgers are truncated (the data is
+// public; a cursor-based pagination API is the long-term fix).
+constexpr size_t MAX_PROPOSAL_LEDGER_RESPONSE_BYTES = 3584ull * 1024; // 3.5MB
+// SmartContractEventsSearch: events are pruned after 3 days, but a busy
+// contract can still accumulate a large history and each event costs a DB
+// read. Results are returned oldest-first and capped at this count; clients
+// page by advancing search_start past the newest event received (the
+// existing timestamp field acts as a cursor, no proto change needed).
+constexpr size_t MAX_EVENT_SEARCH_RESULTS = 256;
+
+// Hard cap on a single (pointer, size) parameter a smart contract passes to a
+// native host function (read via read_wasm_param). Enforced BEFORE any host-side
+// allocation so a contract can't hand the host a bogus multi-GB size and exhaust
+// validator memory (CWE-400). Legitimate params are keys/addresses/JSON payloads
+// (KBs); 16MB is far beyond anything a contract can affordably store or send.
+constexpr uint32_t MAX_WASM_PARAM_BYTES = 16u * 1024 * 1024; // 16MB per host-call parameter
 
 //INTS
 constexpr int TOKEN_MULTIPLIER_VALUE = 10; //10x
@@ -44,6 +101,11 @@ inline const std::string FIRST_TIME_WALLET_FEE = "FIRST_TIME_WALLET_FEE";
 inline const std::string TOKEN_MULTIPLIER = "TOKEN_MULTIPLIER";
 
 inline const std::string EVENT_MANAGEMENT_TEMP = "event_management_temp";
+
+// Balance-tracker hash prefix used to isolate smart contract storage (emit)
+// fees from the main txn fees so they can be reverted independently if the
+// contract crashes/terminates after emitting.
+inline const std::string STORAGE_FEE_HASH_PREFIX = "STORAGE_FEE_BALANCE_";
 inline const std::string NETWORK_FEE_PROXY = "network_fee_proxy_1<>NETWORK_SC";
 inline const std::string ACE_PROXY = "zera_dex_proxy_v1_1<>ACE_";
 inline const std::string ZERA_DEX_PROXY = "zera_dex_proxy_v1_1<>";
@@ -73,6 +135,31 @@ inline std::string get_data_dir() {
 }
 
 inline const std::string DATA_DIR = get_data_dir();
+
+// Path to the external wasm2wat tool used to validate smart contract deploys.
+// Absolute by default (a relative path would resolve against each operator's
+// cwd); overridable via WASM2WAT_PATH for non-standard installs.
+inline std::string get_wasm2wat_path()
+{
+    const char *env_val = std::getenv("WASM2WAT_PATH");
+    return env_val ? std::string(env_val) : "/usr/local/bin/wasm2wat";
+}
+inline const std::string WASM2WAT_LOCATION = get_wasm2wat_path();
+
+// Release-pinned SHA3-256 (lowercase hex) of the wasm2wat binary.
+//
+// wasm2wat output feeds consensus: every validator runs it on the same bytes
+// during smart contract deploy validation, so validators on different wabt
+// builds could disagree on the validity of the same contract and split the
+// network. Pinning the tool hash next to VERSION ties the wabt build to the
+// validator build, which REQUIRED_VERSION already enforces network-wide.
+//
+// At startup the binary at WASM2WAT_LOCATION is hashed and compared against
+// this value; on mismatch the validator refuses to run. A validator that
+// bypasses the check with a different wabt build will produce divergent txn
+// results and be rejected by the rest of the network anyway.
+//
+inline const std::string WASM2WAT_EXPECTED_SHA3_256 = "";
 inline const std::string VALIDATOR_CONFIG = DATA_DIR + "/config/validator.conf";
 inline const std::string EXPLORER_CONFIG = DATA_DIR + "/config/explorer_servers.conf";
 inline const std::string ACTIVITY_WHITELIST = DATA_DIR + "/config/activity_whitelist.conf";

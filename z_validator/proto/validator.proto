@@ -439,6 +439,9 @@ message CheckpointInfo {
     bytes block_hash = 3;                        // Block hash for verification
     uint64 total_size = 4;                       // Total tar.gz file size in bytes
     google.protobuf.Timestamp created_at = 5;    // When checkpoint was created
+    bytes file_hash = 6;                         // SHA3-256 hash of the checkpoint tar.gz file
+    zera_txn.PublicKey public_key = 7;           // Original public key of the validator that created/signed this checkpoint
+    bytes signature = 8;                         // Signature over this message (signature field excluded) by public_key
 }
 
 message CheckpointChunk {

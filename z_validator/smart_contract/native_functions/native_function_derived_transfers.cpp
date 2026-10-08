@@ -167,9 +167,16 @@ namespace
 
         if (status.ok())
         {
-            sender.txn_hashes.push_back(txn.base().hash());
-            block_txns.add_coin_txns()->CopyFrom(txn);
-            txn_hash_tracker::add_sc_hash(txn.base().hash());
+            if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+            {
+                sender.txn_hashes.push_back(txn.base().hash());
+                block_txns.add_coin_txns()->CopyFrom(txn);
+                txn_hash_tracker::add_sc_hash(txn.base().hash());
+            }
+            else
+            {
+                balance_tracker::remove_txn_balance(txn.base().hash());
+            }
         }
 
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());
@@ -808,8 +815,15 @@ WasmEdge_Result DerivedSendAll(void *Data, const WasmEdge_CallingFrameContext *C
         std::string amount;
         if (db_wallets::get_single(derived_wallet_raw + token, amount))
         {
-            std::string status = derived_create_transfer(*sender, token, amount, wallet_string, derived_wallet_raw);
-            transfer_message += token + std::string(": ") + status + std::string(", ");
+            if(amount != "0")
+            {
+                std::string status = derived_create_transfer(*sender, token, amount, wallet_string, derived_wallet_raw);
+                transfer_message += token + std::string(": ") + status + std::string(", ");
+            }
+            else
+            {
+                transfer_message += token + std::string(": OK, ");
+            }
         }
     }
 
@@ -817,8 +831,15 @@ WasmEdge_Result DerivedSendAll(void *Data, const WasmEdge_CallingFrameContext *C
 
     if (db_processed_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount) || db_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount))
     {
-        std::string status = derived_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, derived_wallet_raw, true);
-        transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        if(amount != "0")
+        {
+            std::string status = derived_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, derived_wallet_raw, true);
+            transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        }
+        else
+        {
+            transfer_message += std::string(NETWORK_CONTRACT + " :OK");
+        }
     }
 
     std::string result = transfer_message;
@@ -841,32 +862,22 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
     uint32_t WalletPointer = WasmEdge_ValueGetI32(In[0]);
     uint32_t WalletSize = WasmEdge_ValueGetI32(In[1]);
 
-    uint32_t DelegateWalletPointer = WasmEdge_ValueGetI32(In[2]);
-    uint32_t DelegateWalletSize = WasmEdge_ValueGetI32(In[3]);
+    uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[2]);
+    uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[3]);
 
-    uint32_t DerivedWalletPointer = WasmEdge_ValueGetI32(In[4]);
-    uint32_t DerivedWalletSize = WasmEdge_ValueGetI32(In[5]);
+    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[4]);
+    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[5]);
 
-    uint32_t DelegatePointer = WasmEdge_ValueGetI32(In[6]);
-    uint32_t DelegateSize = WasmEdge_ValueGetI32(In[7]);
+    uint32_t InstancePointer = WasmEdge_ValueGetI32(In[6]);
+    uint32_t InstanceSize = WasmEdge_ValueGetI32(In[7]);
 
-    uint32_t InstancePointer = WasmEdge_ValueGetI32(In[8]);
-    uint32_t InstanceSize = WasmEdge_ValueGetI32(In[9]);
-
-    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[10]);
+    uint32_t TargetPointer = WasmEdge_ValueGetI32(In[8]);
 
     WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
 
     // Get destination wallet
     std::string wallet;
     if (!read_wasm_param(MemCxt, WalletPointer, WalletSize, wallet))
-    {
-        return WasmEdge_Result_Terminate;
-    }
-
-    // Get delegate wallet
-    std::string delegate_wallet;
-    if (!read_wasm_param(MemCxt, DelegateWalletPointer, DelegateWalletSize, delegate_wallet))
     {
         return WasmEdge_Result_Terminate;
     }
@@ -965,8 +976,15 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
         std::string amount;
         if (db_wallets::get_single(derived_wallet_raw + token, amount))
         {
-            std::string status = derived_delegate_create_transfer(*sender, token, amount, wallet_string, sc_name, derived_wallet_raw);
-            transfer_message += token + std::string(": ") + status + std::string(", ");
+            if(amount != "0")
+            {
+                std::string status = derived_delegate_create_transfer(*sender, token, amount, wallet_string, sc_name, derived_wallet_raw);
+                transfer_message += token + std::string(": ") + status + std::string(", ");
+            }
+            else
+            {
+                transfer_message += token + std::string(": OK, ");
+            }
         }
     }
 
@@ -974,8 +992,15 @@ WasmEdge_Result DerivedDelegateSendAll(void *Data, const WasmEdge_CallingFrameCo
 
     if (db_processed_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount) || db_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount))
     {
-        std::string status = derived_delegate_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, sc_name, derived_wallet_raw, true);
-        transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        if(amount != "0")
+        {
+            std::string status = derived_delegate_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, sc_name, derived_wallet_raw, true);
+            transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        }
+        else
+        {
+            transfer_message += std::string(NETWORK_CONTRACT + " :OK");
+        }
     }
 
     std::string result = transfer_message;
@@ -1087,8 +1112,15 @@ WasmEdge_Result DerivedCurrentSendAll(void *Data, const WasmEdge_CallingFrameCon
         std::string amount;
         if (db_wallets::get_single(derived_wallet_raw + token, amount))
         {
-            std::string status = derived_current_create_transfer(*sender, token, amount, wallet_string, derived_wallet_raw);
-            transfer_message += token + std::string(": ") + status + std::string(", ");
+            if(amount != "0")
+            {
+                std::string status = derived_current_create_transfer(*sender, token, amount, wallet_string, derived_wallet_raw);
+                transfer_message += token + std::string(": ") + status + std::string(", ");
+            }
+            else
+            {
+                transfer_message += token + std::string(": OK, ");
+            }
         }
     }
 
@@ -1096,8 +1128,15 @@ WasmEdge_Result DerivedCurrentSendAll(void *Data, const WasmEdge_CallingFrameCon
 
     if (db_processed_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount) || db_wallets::get_single(derived_wallet_raw + NETWORK_CONTRACT, amount))
     {
-        std::string status = derived_current_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, derived_wallet_raw, true);
-        transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        if(amount != "0")
+        {
+            std::string status = derived_current_create_transfer(*sender, NETWORK_CONTRACT, amount, wallet_string, derived_wallet_raw, true);
+            transfer_message += std::string(NETWORK_CONTRACT + " :") + status;
+        }
+        else
+        {
+            transfer_message += std::string(NETWORK_CONTRACT + " :OK");
+        }
     }
 
     std::string result = transfer_message;

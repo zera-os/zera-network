@@ -380,6 +380,41 @@ namespace
             return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_utils.cpp: process_transfer_fees: base fee percent is greater or smaller than 100%");
         }
 
+        // Internal smart contract txn: the network fee is metered as gas drawn from
+        // the contract's approved budget instead of being charged in currency. It
+        // gets settled (or refunded on crash) with the root smart contract txn's gas.
+        if (sc_txn)
+        {
+            uint256_t usd_fee = fee_type * txn->ByteSize();
+
+            for (auto public_key : txn->auth().public_key())
+            {
+                usd_fee += get_key_fee(public_key);
+            }
+
+            for (auto output : txn->output_transfers())
+            {
+                std::string output_wallet_key = output.wallet_address() + txn->contract_id();
+
+                if (!db_wallets::exist(output_wallet_key))
+                {
+                    usd_fee += get_fee(FIRST_TIME_WALLET_FEE);
+                }
+            }
+
+            if (!consume_sc_txn_fee_gas(usd_fee))
+            {
+                // Also mark the status fee record, since unpack_process_wrapper
+                // overwrites the ZeraStatus txn_status with status_fees.status().
+                status_fees.set_status(zera_txn::TXN_STATUS::OUT_OF_GAS);
+                return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_coin.cpp: process_base_fees: insufficient gas for internal txn network fee", zera_txn::TXN_STATUS::OUT_OF_GAS);
+            }
+
+            status_fees.set_base_contract_id(contract.contract_id());
+            status_fees.set_base_fees("0");
+            return ZeraStatus();
+        }
+
         // check to see if token is qualified and get usd_equiv if it is, or send back zra usd equiv if it is not qualified
         uint256_t equiv;
 
@@ -454,18 +489,7 @@ namespace
                     return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_utils.cpp: process_simple_fees: fee amount is greater than auth amount: " + contract.contract_id());
                 }
 
-                //CHANGELOG: added sc_fee address for sc_txns
-                std::string wallet_key;
-
-                if(sc_txn)
-                {
-                    wallet_key = sc_fee_address;
-                }
-                else
-                {
-                    wallet_key = wallets::generate_wallet(txn->auth().public_key(x));
-                }
-
+                std::string wallet_key = wallets::generate_wallet(txn->auth().public_key(x));
 
                 status = zera_fees::process_fees(contract, fee_amount, wallet_key, contract.contract_id(), true, status_fees, txn->base().hash(), fee_address);
 
@@ -720,6 +744,7 @@ namespace
             }
 
             int x = 0;
+            /
             if(sc_txn)
             {
                 return ZeraStatus();

@@ -30,6 +30,7 @@ public:
     
     static ZeraStatus process_block_from_sync(const zera_validator::Block &block)
     {
+        logging::print("process_block_from_sync", true);
         std::lock_guard<std::mutex> lock(processing_mutex);
         return block_process(block);
         // Other processing logic if needed
@@ -37,6 +38,7 @@ public:
 
     static ZeraStatus process_block_from_broadcast(const zera_validator::Block &block)
     {
+        logging::print("process_block_from_broadcast", true);
         std::lock_guard<std::mutex> lock(processing_mutex);
         return block_process(block, true);
         // Other processing logic if needed

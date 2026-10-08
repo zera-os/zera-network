@@ -15,3 +15,6 @@ std::string encode_smart_contract_state(const SmartContractState &state);
 // New decode
 NetworkTXN decode_network_txn(const std::string &b64_encoded);
 ContractUpdateTXN decode_contract_update_txn(const std::string &b64_encoded);
+InstrumentContractTXN decode_instrument_contract_txn(const std::string &b64_encoded);
+CoinTXN decode_coin_txn(const std::string &b64_encoded);
+MintTXN decode_mint_txn(const std::string &b64_encoded);

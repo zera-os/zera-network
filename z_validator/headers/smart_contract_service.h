@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include "block_emit_type.h"
 
 
@@ -31,7 +32,12 @@ public:
       std::map<std::string, std::string>& derived_wallets,
       const std::string &fee_id,
       std::map<std::string, BlockEmitType> &block_emits,
-      bool &panic);
+      bool &panic,
+      uint64_t &storage_gas,
+      uint64_t &txn_fee_gas,
+      const std::map<std::string, std::string> &allowance_remaining,
+      const std::set<std::string> &allowance_unlimited,
+      bool allowance_provided);
   static std::vector<std::any> runCall(std::string smart_contract_instance,const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv);
   static std::vector<std::any> run(std::string smart_contract_instance, const char *wasmFileLocation, std::string wasmFileContent, std::string wasm_function, std::vector<std::any> func_params, int preopenLen, const char *const *preopens, int argc, const char *const *argv, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes, bool &panic);
   static std::vector<std::any> runScriptingLang(std::string smart_contract_instance, const char *wasmFile, std::string binary_code, std::string wasm_function, std::vector<std::any> func_params, const uint64_t& limit, uint64_t& used_gas, std::vector<std::string>& txn_hashes, bool &panic);

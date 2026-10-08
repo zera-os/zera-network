@@ -93,6 +93,14 @@ public:
     }
 
 
+    // Verify the cryptographic signature and hash of every user-submitted txn
+    // embedded in a block. Used on the block-acceptance paths (broadcast/sync),
+    // where blocks are reconstructed from their embedded txns but signatures were
+    // otherwise only checked at mempool ingress. Internally-generated txns
+    // (smart contract / governance child txns, which carry no user signature) are
+    // skipped, and duplicate txn hashes within the block are rejected.
+    static ZeraStatus verify_block_txns(const zera_validator::Block &block);
+
     template <typename TXType>
     static void store_wrapper(const TXType *txn, zera_txn::TXNWrapper &wrapper);
 

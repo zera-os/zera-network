@@ -55,3 +55,13 @@ class zera_fees
     static ZeraStatus process_simple_fees_gas(const TXType *txn, zera_txn::TXNStatusFees &status_fees, const zera_txn::TRANSACTION_TYPE &txn_type, uint256_t &fee_amount, const std::string &fee_address = "", const bool &sc_txn = false, const std::string &sc_fee_address = "");
 
 };
+
+// Charge an internal smart contract txn's network fee as gas drawn from the live
+// contract's approved gas budget (the global execution sender). usd_fee is the fee
+// in USD fee-units BEFORE any denomination/equiv/multiplier conversion (i.e.
+// fee_per_byte * bytes + key fees + first-time wallet fees). Accumulates into
+// sender.txn_fee_gas (settled only on success). Returns false if the budget cannot
+// afford it, in which case the internal txn should fail with OUT_OF_GAS.
+// Implemented in smart_contract/helpers/nf_fee_helper.cpp; declared here (and not
+// in nf_helpers.h) so block_process callers don't have to pull in wasmedge.h.
+bool consume_sc_txn_fee_gas(const uint256_t &usd_fee);

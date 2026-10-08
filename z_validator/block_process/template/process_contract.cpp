@@ -334,11 +334,11 @@ ZeraStatus block_process::check_parameters<zera_txn::InstrumentContract>(const z
 
     if (txn->base().public_key().has_smart_contract_auth())
     {
-        if (txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1")
+        if (txn->base().public_key().smart_contract_auth() == "sc_bridge_proxy_1" || txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1")
         {
             bridge = true;
         }
-        else if(txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_v1_1")
+        else if(txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_1" || txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_v1_1") 
         {
             zera_dex = true;
         }

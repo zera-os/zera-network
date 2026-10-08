@@ -93,6 +93,40 @@ namespace
         std::string last_height = std::to_string(last_header.block_height());
         validator_utils::archive_balances(last_height);
     }
+    // Verify the wasm2wat binary matches the release-pinned hash from const.h.
+    // wasm2wat output feeds consensus (smart contract deploy validation), so a
+    // validator running a different wabt build than the rest of the network is
+    // a consensus-split risk. Refuse to start rather than diverge later.
+    bool check_wasm2wat_binary()
+    {
+        if (WASM2WAT_EXPECTED_SHA3_256.empty())
+        {
+            logging::print("WARNING: WASM2WAT_EXPECTED_SHA3_256 is not set; skipping wasm2wat binary verification. This must be pinned for release builds.", false);
+            return true;
+        }
+
+        std::vector<uint8_t> hash = Hashing::sha256_hash_file(WASM2WAT_LOCATION);
+
+        if (hash.empty())
+        {
+            logging::print("Error: unable to read wasm2wat binary at " + WASM2WAT_LOCATION + ". Install the pinned wabt release or set WASM2WAT_PATH.", false);
+            return false;
+        }
+
+        std::string hash_hex = hex_conversion::bytes_to_hex(hash);
+
+        if (hash_hex != WASM2WAT_EXPECTED_SHA3_256)
+        {
+            logging::print("Error: wasm2wat binary at " + WASM2WAT_LOCATION + " does not match the required version for this validator build.", false);
+            logging::print("  expected sha3-256: " + WASM2WAT_EXPECTED_SHA3_256, false);
+            logging::print("  actual   sha3-256: " + hash_hex, false);
+            logging::print("Install the wabt release pinned for validator version " + std::to_string(VERSION) + ".", false);
+            return false;
+        }
+
+        return true;
+    }
+
     bool check_config()
     {
         if (ValidatorConfig::get_local_mode())
@@ -129,19 +163,7 @@ namespace
 
     bool configure_self(zera_txn::ValidatorRegistration &registration_message)
     {
-        std::string validator_config = ValidatorConfig::get_block_height();
-        if (validator_config != "NONE" && validator_config != "")
-        {
-            logging::print("Restoring database from", validator_config, false);
-            Reorg::restore_database(validator_config, 0);
-
-            if (ValidatorConfig::get_shutdown())
-            {
-                logging::print("Shutdown flag detected after reorg restoration. Exiting.");
-                return false;
-            }
-            ValidatorConfig::set_config();
-        }
+        // Configured/pending restores have already completed before open_dbs().
 
         ValidatorConfig::generate_keys();
 
@@ -159,6 +181,18 @@ namespace
         }
 
         set_explorer_config();
+
+        if (ValidatorConfig::get_protonet())
+        {
+            // Protonet runs often start from a state identical to mainnet, which
+            // means db_validators is full of real mainnet validators. Wipe them
+            // (and their lookup entries) before registering ourselves so gossip,
+            // registration and heartbeat broadcasts never ping mainnet nodes.
+            logging::print("Protonet mode enabled: removing all known validators before self registration.", false);
+            db_validators::remove_all();
+            db_validator_lookup::remove_all();
+        }
+
         zera_txn::Validator validator;
 
         store_self(&validator);
@@ -197,12 +231,10 @@ namespace
         zera_txn::ValidatorHeartbeat *heartbeat = new zera_txn::ValidatorHeartbeat();
 
         create_heartbeat(*heartbeat, nonce);
-
-        ValidatorNetworkClient::StartGossip(heartbeat);
-        delete heartbeat;
+        ValidatorNetworkClient::StartHeartBeatSeeds(heartbeat);
     }
 
-        std::string create_validator_block(zera_txn::ValidatorRegistration &registration_message)
+    std::string create_validator_block(zera_txn::ValidatorRegistration &registration_message)
     {
         zera_validator::Block block;
         zera_txn::ValidatorRegistration *registration = block.mutable_transactions()->add_validator_registration_txns();
@@ -281,15 +313,23 @@ bool startup_config::configure_startup()
         return false;
     }
 
-    // open all databases
-    open_dbs();
-
-    ValidatorConfig::set_config();
+    ValidatorConfig::load_file_config();
+    // Never create empty databases over an interrupted or incomplete restore.
+    if (!Reorg::recover_before_open()) return false;
+    if (!open_dbs()) return false;
+    Reorg::mark_databases_open();
+    ValidatorConfig::load_chain_config();
 
     // set configuration
     if (!check_config())
     {
         logging::print("Configuration is not set correctly. Please check your configuration file.");
+        return false;
+    }
+
+    // refuse to run with a wasm2wat binary that doesn't match this build's pin
+    if (!check_wasm2wat_binary())
+    {
         return false;
     }
 
@@ -330,7 +370,9 @@ bool startup_config::configure_startup()
             std::this_thread::sleep_for(std::chrono::seconds(10));
         }
         ValidatorNetworkClient::SyncFromCheckpoint();
+        if (ValidatorConfig::get_shutdown()) return false; // Checkpoint restore requires restart.
         sync = ValidatorNetworkClient::StartSyncBlockchain(true);
+        if (ValidatorConfig::get_shutdown()) return false;
         logging::print("Successfull Network sync.", false);
         if (sync)
         {
@@ -404,10 +446,6 @@ bool startup_config::configure_startup()
     {
         thread3.detach();
     }
-
-    auto proposal_id = base58_decode("3NH8b1oBvZyqmNztQmuiHTjdJGdghoGU8VBJ3oG9ZCUY");
-    std::string proposal_string(proposal_id.begin(), proposal_id.end());
-    db_process_adaptive_ledger::remove_single(proposal_string);
 
     return true;
 }

@@ -24,6 +24,8 @@ struct BlockWork{
 
 class ValidatorConfig{
 public:
+	static void load_file_config(); // Safe before databases are opened.
+	static void load_chain_config(); // Requires open databases.
 	static void set_config();								//set validator configurations
 	static void set_fee_address();							//set address of the validator fees
 	static void generate_keys();							//generate keys for the validator (these are the keys used to sign the blocks & txns)
@@ -51,12 +53,14 @@ public:
 	static std::string get_treasury_wallet();				//get the treasury wallet of the network
 	static std::string get_register();
 	static std::vector<std::string> get_whitelist(); 		//get whitelisted ips for rate_limiter
+	static std::string get_checkpoint_key();				//get the pinned public key expected to have signed downloaded checkpoints (empty = not pinned)
 	static void set_required_version(const uint32_t& version);
 	static BlockWork get_block_work();
 	static bool get_shutdown();
 	static void set_shutdown(bool shutdown);
 	static bool get_local_mode();
 	static void set_local_mode(bool local_mode);
+	static bool get_protonet();
 
 	static std::string get_block_height();
 	static bool get_dev_mode();
@@ -84,9 +88,11 @@ public:
 	static bool dev_mode_;
 	static std::string register_;
 	static std::vector<std::string> white_list_;
+	static std::string checkpoint_key_;
 	static BlockWork block_work_;
 	static bool shutdown_;
 	static bool local_mode_;
+	static bool protonet_;
 
 	static void set_block_work(uint64_t block_height);
 	static void clear_block_work();
@@ -104,9 +110,11 @@ public:
 	static void set_staked_contract_id(const std::string& staked_contract_id);
 	static void set_block_height(const std::string& block_height);
 	static void set_dev_mode(bool dev_mode);
+	static void set_protonet(bool protonet);
 	static void set_register(const std::string& register_str);
 	static void set_api_port(const std::string& api_port);
 	static void set_whitelist(const std::string& whitelist);
+	static void set_checkpoint_key(const std::string& checkpoint_key);
 };
 
 

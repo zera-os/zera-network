@@ -12,6 +12,7 @@
 #include "signatures.h"
 #include "test.h"
 #include "validators.h"
+#include "const.h"
 
 namespace
 {
@@ -77,12 +78,29 @@ namespace
 
 grpc::Status ValidatorServiceImpl::SyncBlockchain(grpc::ServerContext *context, const BlockSync *request, grpc::ServerWriter<zera_validator::DataChunk>* writer)
 {
+    // Require a validly signed request before doing any work. This does not prove
+    // the caller is a registered validator (fresh validators sync before they are
+    // known network-wide), but it forces every caller to construct and sign a
+    // well-formed request instead of accepting anonymous ones.
+    BlockSync request_copy;
+    request_copy.CopyFrom(*request);
+    if (!signatures::verify_request(request_copy))
+    {
+        logging::print("SyncBlockchain: rejected request with invalid signature", false);
+        return grpc::Status(grpc::StatusCode::UNAUTHENTICATED, "invalid block sync request signature");
+    }
 
-    // if (!signatures::verify_block_sync(request_copy)) {
-    //     return grpc::Status::CANCELLED;
-    // }
     std::string last_key = request->last_key();
     int amount = request->amount();
+
+    // The legitimate client pages in batches of exactly BLOCK_SYNC blocks, so any
+    // other amount is a malformed or malicious request trying to force unbounded
+    // RocksDB reads, response construction, and outbound bandwidth (CWE-400).
+    if (amount <= 0 || amount > BLOCK_SYNC)
+    {
+        logging::print("SyncBlockchain: rejected request with out-of-range amount: " + std::to_string(amount), false);
+        return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "block sync amount out of range");
+    }
     zera_validator::BlockBatch response;
     std::vector<zera_validator::DataChunk> chunks;
     std::vector<zera_validator::Block> blocks;

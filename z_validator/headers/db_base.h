@@ -32,7 +32,6 @@ public:
     static int get_first_data(std::string &key, std::string &value);
     static int get_next_data(const std::string &iterate_from, std::string &key, std::string &value);
     static int backup_database(const std::string &backup_path);
-    static int restore_database(const std::string &backup_path, int code);
     static int checkpoint_database(const std::string &version);
     static int compact_all();
     static int find_by_prefix(const std::string &prefix, std::vector<std::string> &keys, std::vector<std::string> &values);
@@ -345,7 +344,7 @@ public:
     static int get_multi_data_keys(std::string &start_key, int amount, std::vector<zera_validator::BlockHeader> &blocks, std::vector<std::string>& keys);
 };
 
-void open_dbs();
+bool open_dbs();
 void close_dbs();
 void nuke_db();
 

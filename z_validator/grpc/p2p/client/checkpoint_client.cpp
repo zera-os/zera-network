@@ -10,6 +10,8 @@
 #include "db_base.h"
 #include "signatures.h"
 #include "validators.h"
+#include "wallets.h"
+#include "hashing.h"
 #include "../../../logging/logging.h"
 #include "../../../db/reorg.h"
 
@@ -38,6 +40,41 @@ namespace
         timestamp->set_seconds(std::chrono::duration_cast<std::chrono::seconds>(now.time_since_epoch()).count());
         
         signatures::sign_request(request, ValidatorConfig::get_gen_key_pair());
+    }
+
+    // Verify the CheckpointInfo record is signed by its creator and, when the
+    // operator pinned a checkpoint_key in the config, that the signer is exactly
+    // that key. The operator chooses who they checkpoint from, and validator keys
+    // are public knowledge, so pinning gives end-to-end authenticity for the
+    // entire bootstrap regardless of which host actually served the bytes.
+    bool verify_checkpoint_info_authenticity(const zera_validator::CheckpointInfo& info, const std::string& host)
+    {
+        std::string pinned_key = ValidatorConfig::get_checkpoint_key();
+
+        if (info.signature().empty() || !info.has_public_key())
+        {
+            if (!pinned_key.empty())
+            {
+                logging::error("Checkpoint info from " + host + " is unsigned but a checkpoint_key is pinned - rejecting");
+                return false;
+            }
+            logging::print("WARNING: checkpoint info from", host, "is unsigned (legacy checkpoint), no authenticity check possible");
+            return true;
+        }
+
+        if (!signatures::verify_checkpoint_info(info))
+        {
+            logging::error("Checkpoint info signature verification failed from " + host);
+            return false;
+        }
+
+        if (!pinned_key.empty() && wallets::get_public_key_string(info.public_key()) != pinned_key)
+        {
+            logging::error("Checkpoint info from " + host + " signed by unexpected key (does not match pinned checkpoint_key)");
+            return false;
+        }
+
+        return true;
     }
 
     // Extract the tar.gz file to the checkpoints directory
@@ -72,7 +109,8 @@ grpc::Status ValidatorNetworkClient::GetCheckpointInfo(
 // Stream checkpoint from a remote validator
 grpc::Status ValidatorNetworkClient::StreamCheckpoint(
     const zera_validator::CheckpointRequest* request,
-    const std::string& output_path)
+    const std::string& output_path,
+    uint64_t* streamed_size)
 {
     grpc::ClientContext context;
     // Set a longer deadline for large file transfers (1 hour)
@@ -156,6 +194,15 @@ grpc::Status ValidatorNetworkClient::StreamCheckpoint(
         return grpc::Status(grpc::StatusCode::DATA_LOSS, "Incomplete download");
     }
     
+    // Report the authoritative size the stream actually delivered (the live file
+    // size advertised by the server), so the caller validates against this rather
+    // than the separately-fetched CheckpointInfo size, which can drift if the
+    // checkpoint tar was regenerated between the info request and the stream.
+    if (streamed_size != nullptr)
+    {
+        *streamed_size = total_size;
+    }
+
     logging::print("Checkpoint download completed:", std::to_string(bytes_received), "bytes in", 
                    std::to_string(chunks_received), "chunks");
     return grpc::Status::OK;
@@ -223,6 +270,11 @@ bool ValidatorNetworkClient::SyncFromCheckpoint()
                        "block height:" + std::to_string(info_response.block_height()),
                        "size:" + std::to_string(info_response.total_size()));
 
+        if (!verify_checkpoint_info_authenticity(info_response, host))
+        {
+            continue;
+        }
+
 
         std::string block_key;
         std::string block_header_data;
@@ -245,7 +297,8 @@ bool ValidatorNetworkClient::SyncFromCheckpoint()
         zera_validator::CheckpointRequest checkpoint_request;
         set_checkpoint_request(&checkpoint_request, info_response.version());
         
-        status = client.StreamCheckpoint(&checkpoint_request, tar_path);
+        uint64_t streamed_size = 0;
+        status = client.StreamCheckpoint(&checkpoint_request, tar_path, &streamed_size);
         
         if (!status.ok())
         {
@@ -253,12 +306,35 @@ bool ValidatorNetworkClient::SyncFromCheckpoint()
             continue;
         }
         
-        // Verify file size
-        if (std::filesystem::file_size(tar_path) != info_response.total_size())
+        // Verify the file written to disk matches what the stream actually delivered.
+        // Compare against the stream's advertised size (authoritative live file size),
+        // not info_response.total_size(): the latter is fetched in a separate earlier
+        // RPC and can legitimately drift if the checkpoint tar was regenerated, which
+        // would otherwise fail an otherwise-complete download. Content authenticity is
+        // anchored by block_hash after restore, not by this size.
+        if (std::filesystem::file_size(tar_path) != streamed_size)
         {
-            logging::error("Downloaded file size mismatch");
+            logging::error("Downloaded file size mismatch: on-disk " + std::to_string(std::filesystem::file_size(tar_path)) +
+                           " stream-reported " + std::to_string(streamed_size));
             std::filesystem::remove(tar_path);
             continue;
+        }
+
+        // Verify the downloaded archive matches the hash inside the signed
+        // CheckpointInfo. Combined with the signature check above, this proves the
+        // exact bytes on disk are the checkpoint the (pinned) creator produced, no
+        // matter which host served them.
+        if (!info_response.file_hash().empty())
+        {
+            std::vector<uint8_t> local_hash = Hashing::sha256_hash_file(tar_path);
+            std::string local_hash_str(local_hash.begin(), local_hash.end());
+            if (local_hash.empty() || local_hash_str != info_response.file_hash())
+            {
+                logging::error("Checkpoint archive hash mismatch from " + host + " - discarding download");
+                std::filesystem::remove(tar_path);
+                continue;
+            }
+            logging::print("Checkpoint archive hash verified:", info_response.version());
         }
         
         // Extract checkpoint
@@ -269,9 +345,11 @@ bool ValidatorNetworkClient::SyncFromCheckpoint()
         
         // Restore databases from checkpoint
         logging::print("Restoring databases from checkpoint...");
-        Reorg::restore_database(info_response.version(), 2);
-        logging::print("Checkpoint sync completed successfully from:", host);
-        return true;
+        // Do not swap RocksDB files while any handle or worker can use them.
+        // The next process validates and installs this snapshot before opening DBs.
+        Reorg::request_restore(info_response.version(), 2);
+        logging::print("Checkpoint downloaded; validator stopping for offline restoration from:", host);
+        return false;
     }
     
     logging::error("Failed to sync from checkpoint from any validator");

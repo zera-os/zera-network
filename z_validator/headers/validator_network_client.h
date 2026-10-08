@@ -69,11 +69,11 @@ public:
 	static bool StartSyncBlockchain(const bool seed_sync = false);
 	// static void StartBroadcast(const zera_validator::Block *request);
 	static void StartRegisterSeeds(const ValidatorRegistration *request);
-	static void StartHeartBeat(const zera_txn::ValidatorHeartbeat *request);
+	static void StartHeartBeatSeeds(const zera_txn::ValidatorHeartbeat *request);
 
 	// Checkpoint sync functions
 	grpc::Status GetCheckpointInfo(const zera_validator::CheckpointInfoRequest* request, zera_validator::CheckpointInfo* response);
-	grpc::Status StreamCheckpoint(const zera_validator::CheckpointRequest* request, const std::string& output_path);
+	grpc::Status StreamCheckpoint(const zera_validator::CheckpointRequest* request, const std::string& output_path, uint64_t* streamed_size = nullptr);
 	static bool SyncFromCheckpoint();
 
 	static zera_validator::NonceResponse GetNonce(const std::string &server_address)

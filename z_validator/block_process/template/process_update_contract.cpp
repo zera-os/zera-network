@@ -239,6 +239,7 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
     logging::log("process_update_contract.cpp: check_parameters: ContractUpdateTXN");
     std::string base_pub_key = wallets::get_public_key_string(txn->base().public_key());
     HashType type = wallets::get_wallet_type(base_pub_key);
+
     if (type != HashType::wallet_r && type != HashType::wallet_g && type != HashType::wallet_sc)
     {
         return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_update_contract.cpp: check_parameters: sender key is not restricted", zera_txn::TXN_STATUS::INVALID_AUTH_KEY);
@@ -271,9 +272,10 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
     if (txn->has_name())
     {
         std::regex name_pattern("^[A-Za-z0-9 ]*$");
-        
+
         if (txn->name().size() < 3 || txn->name().size() > 200 || !std::regex_match(txn->name(), name_pattern))
         {
+            logging::print(txn->name(), true);
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_update_contract.cpp: check_parameters: Contract name is either too big or too small.", zera_txn::TXN_STATUS::INVALID_CONTRACT_PARAMETERS);
         }
     }
@@ -299,6 +301,7 @@ ZeraStatus block_process::check_parameters<zera_txn::ContractUpdateTXN>(const ze
 
         std::string pub_key = wallets::get_public_key_string(key.public_key());
         HashType type = wallets::get_wallet_type(pub_key);
+        
         if ((type != HashType::wallet_r && type != HashType::wallet_g && type != HashType::wallet_sc && !std::regex_match(pub_key, pattern) && !std::regex_match(pub_key, pattern2)) || pub_key == txn->contract_id())
         {
             logging::print(pub_key, true);

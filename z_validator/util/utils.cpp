@@ -328,7 +328,9 @@ uint256_t get_txn_fee_contract(const zera_txn::TRANSACTION_TYPE &txn_type, const
     {
     case zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE:
     {
-        if (txn->base().public_key().has_smart_contract_auth() && (txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1"
+        if (txn->base().public_key().has_smart_contract_auth() && (txn->base().public_key().smart_contract_auth() == "sc_bridge_proxy_1" 
+        || txn->base().public_key().smart_contract_auth() == "sc_zera_bridge_proxy_1"
+        || txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_1"
         || txn->base().public_key().smart_contract_auth() == "sc_zera_dex_proxy_v1_1"))
         {
             return get_fee("CONTRACT_TXN_FEE");

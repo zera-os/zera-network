@@ -183,9 +183,16 @@ namespace
 
         if (status.ok())
         {
-            sender.txn_hashes.push_back(txn.base().hash());
-            block_txns.add_coin_txns()->CopyFrom(txn);
-            txn_hash_tracker::add_sc_hash(txn.base().hash());
+            if (status.txn_status() == zera_txn::TXN_STATUS::OK)
+            {
+                sender.txn_hashes.push_back(txn.base().hash());
+                block_txns.add_coin_txns()->CopyFrom(txn);
+                txn_hash_tracker::add_sc_hash(txn.base().hash());
+            }
+            else
+            {
+                balance_tracker::remove_txn_balance(txn.base().hash());
+            }
         }
 
         db_smart_contracts::store_single(sender.block_txns_key, block_txns.SerializeAsString());
@@ -225,6 +232,16 @@ namespace
         set_input(txn.add_input_transfers(), input_amount);
 
         calc_fee_coin_txn(&txn, sender.fee_id, txn_fee_amount);
+
+        // Enforce the user-signed per-execution outflow allowance. On over-cap we
+        // flag panic so the host function terminates the whole execution (revert).
+        std::string allowance_error = sc_check_user_outflow_allowance(&sender, txn);
+        if (!allowance_error.empty())
+        {
+            sender.panic = true;
+            logging::print("[TransferMulti] " + allowance_error, true);
+            return allowance_error;
+        }
 
         auto hash_vec = Hashing::sha256_hash(txn.SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
@@ -362,6 +379,12 @@ WasmEdge_Result TransferMulti(void *Data, const WasmEdge_CallingFrameContext *Ca
     }
 
     std::string status = create_transfer(*sender, contract_id, input_amount, amounts, decoded_wallets);
+
+    // Outflow allowance exceeded: terminate the whole execution (revert everything).
+    if (sender->panic)
+    {
+        return WasmEdge_Result_Terminate;
+    }
 
     logging::print("[TransferMulti] Status: ", status, true);
 

@@ -76,6 +76,20 @@ void ValidatorNetworkClient::StartRegisterSeeds(const ValidatorRegistration *req
     delete registration_request;
 }
 
+void ValidatorNetworkClient::StartHeartBeatSeeds(const zera_txn::ValidatorHeartbeat *request)
+{
+    std::vector<std::shared_ptr<grpc::Channel>> channels;
+    for (auto seed : ValidatorConfig::get_seed_validators())
+    {
+        std::shared_ptr<grpc::Channel> channel = grpc::CreateChannel(seed, grpc::InsecureChannelCredentials());
+        channels.push_back(channel);
+    }
+    ValidatorNetworkClient client(channels);
+    client.AsyncValidatorSend(request);
+    client.delete_calls();
+    delete request;
+}
+
 // Public function to start gossip protocal
 template <typename TXType>
 void ValidatorNetworkClient::StartGossip(const TXType *request)

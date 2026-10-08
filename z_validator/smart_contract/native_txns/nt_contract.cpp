@@ -2,6 +2,8 @@
 #include "nf_helpers.h"
 #include "base58.h"
 
+#include "txn.pb.h"
+
 namespace
 {
     std::string bytes_to_proto(const std::vector<uint8_t> &bytes)
@@ -67,6 +69,21 @@ namespace
             return zera_txn::MONTHS;
         default:
             return zera_txn::DAYS;
+        }
+    }
+
+    zera_txn::CONTRACT_TYPE to_proto_contract_type(ContractType type)
+    {
+        switch (type)
+        {
+        case ContractType::Token:
+            return zera_txn::TOKEN;
+        case ContractType::Nft:
+            return zera_txn::NFT;
+        case ContractType::Sbt:
+            return zera_txn::SBT;
+        default:
+            return zera_txn::TOKEN;
         }
     }
 
@@ -166,13 +183,11 @@ namespace
             dst->set_max_approved(src.max_approved.value());
     }
 
-    void fill_contract_update_txn(zera_txn::ContractUpdateTXN *dst, const ContractUpdateTXN &src)
+    void fill_instrument_contract_txn(zera_txn::InstrumentContract *dst, const InstrumentContractTXN &src)
     {
-        dst->set_contract_id(src.contract_id);
         dst->set_contract_version(src.contract_version);
-
-        if (src.name.has_value())
-            dst->set_name(src.name.value());
+        dst->set_symbol(src.symbol);
+        dst->set_name(src.name);
 
         if (src.governance.has_value())
             fill_governance(dst->mutable_governance(), src.governance.value());
@@ -180,8 +195,25 @@ namespace
         for (const auto &rk : src.restricted_keys)
             fill_restricted_key(dst->add_restricted_keys(), rk);
 
+        if (src.max_supply.has_value())
+            dst->set_max_supply(src.max_supply.value());
+
         if (src.contract_fees.has_value())
             fill_contract_fees(dst->mutable_contract_fees(), src.contract_fees.value());
+
+        for (const auto &pw : src.premint_wallets)
+        {
+            auto *proto_pw = dst->add_premint_wallets();
+            proto_pw->set_address(pw.address);
+            proto_pw->set_amount(pw.amount);
+        }
+
+        if (src.coin_denomination.has_value())
+        {
+            auto *cd = dst->mutable_coin_denomination();
+            cd->set_denomination_name(src.coin_denomination.value().denomination_name);
+            cd->set_amount(src.coin_denomination.value().amount);
+        }
 
         for (const auto &kv : src.custom_parameters)
         {
@@ -190,6 +222,8 @@ namespace
             param->set_value(kv.value);
         }
 
+        dst->set_contract_id(src.contract_id);
+
         for (const auto &er : src.expense_ratio)
         {
             auto *ratio = dst->add_expense_ratio();
@@ -197,6 +231,13 @@ namespace
             ratio->set_month(er.month);
             ratio->set_percent(er.percent);
         }
+
+        dst->set_type(to_proto_contract_type(src.contract_type));
+        dst->set_update_contract_fees(src.update_contract_fees);
+        dst->set_update_expense_ratio(src.update_expense_ratio);
+
+        if (src.quash_threshold.has_value())
+            dst->set_quash_threshold(src.quash_threshold.value());
 
         for (const auto &tc : src.token_compliance)
         {
@@ -209,42 +250,46 @@ namespace
             }
         }
 
-        if (src.kyc_status.has_value())
-            dst->set_kyc_status(src.kyc_status.value());
+        dst->set_kyc_status(src.kyc_status);
+        dst->set_immutable_kyc_status(src.immutable_kyc_status);
 
-        if (src.immutable_kyc_status.has_value())
-            dst->set_immutable_kyc_status(src.immutable_kyc_status.value());
-
-        if (src.quash_threshold.has_value())
-            dst->set_quash_threshold(src.quash_threshold.value());
+        for (const auto &msr : src.max_supply_release)
+        {
+            auto *proto_msr = dst->add_max_supply_release();
+            proto_msr->mutable_release_date()->set_seconds(msr.release_date.seconds);
+            proto_msr->mutable_release_date()->set_nanos(msr.release_date.nanos);
+            proto_msr->set_amount(msr.amount);
+        }
     }
 }
 
-std::string nt_process_contract_update(SenderDataType *sender, const NetworkTXN &network_txn)
+std::string nt_process_contract(SenderDataType *sender, const NetworkTXN &network_txn)
 {
 
-    ContractUpdateTXN contract_update_txn = decode_contract_update_txn(network_txn.payload);
+    InstrumentContractTXN instrument_contract_txn = decode_instrument_contract_txn(network_txn.payload);
 
-    zera_txn::ContractUpdateTXN txn;
+    zera_txn::InstrumentContract txn;
 
-    fill_contract_update_txn(&txn, contract_update_txn);
+    fill_instrument_contract_txn(&txn, instrument_contract_txn);
 
     zera_txn::BaseTXN base = create_base(sender, network_txn.sender);
 
     if(!base.IsInitialized())
     {
-        return "ERROR: Failed to create base for contract update";
+        logging::print("[nt_process_contract] Failed to create base for instrument contract", true);
+        return "ERROR: Failed to create base for instrument contract";
     }
 
     txn.mutable_base()->CopyFrom(base);
 
-    calc_fee(&base, sender->fee_id, txn.ByteSizeLong(), zera_txn::TRANSACTION_TYPE::UPDATE_CONTRACT_TYPE);
+    calc_fee(&base, sender->fee_id, txn.ByteSizeLong(), zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE);
 
-    set_txn_hash<zera_txn::ContractUpdateTXN>(&txn);
+    set_txn_hash<zera_txn::InstrumentContract>(&txn);
 
     if(!txn.IsInitialized())
     {
-        return "ERROR: Failed to initialize contract update transaction";
+        logging::print("[nt_process_contract] Failed to initialize instrument contract transaction", true);
+        return "ERROR: Failed to initialize instrument contract transaction";
     }
 
     std::string value;
@@ -252,11 +297,18 @@ std::string nt_process_contract_update(SenderDataType *sender, const NetworkTXN 
     zera_txn::TXNS block_txns;
     block_txns.ParseFromString(value);
 
-    ZeraStatus status = process_txn<zera_txn::ContractUpdateTXN>(&txn, block_txns, zera_txn::TRANSACTION_TYPE::UPDATE_CONTRACT_TYPE, sender);
+    ZeraStatus status = process_txn<zera_txn::InstrumentContract>(&txn, block_txns, zera_txn::TRANSACTION_TYPE::CONTRACT_TXN_TYPE, sender);
 
     if(status.ok() && status.txn_status() == zera_txn::TXN_STATUS::OK)
     {
-        block_txns.add_contract_update_txns()->CopyFrom(txn);
+        logging::print("[nt_process_contract] Successfully processed instrument contract transaction", true);
+        block_txns.add_contract_txns()->CopyFrom(txn);
+    }
+    else
+    {
+        logging::print("[nt_process_contract] Failed to process instrument contract transaction", true);
+        logging::print(status.read_status(), true);
+        logging::print(zera_txn::TXN_STATUS_Name(status.txn_status()), true);
     }
 
     db_smart_contracts::store_single(sender->block_txns_key, block_txns.SerializeAsString());

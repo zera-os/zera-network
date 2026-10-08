@@ -1,3 +1,5 @@
+#include <chrono>
+
 #include "validator_network_service_grpc.h"
 #include "db_base.h"
 
@@ -330,20 +332,8 @@ void ValidatorServiceImpl::ProcessGossipTXN(const TXType *request, std::string c
 grpc::Status ValidatorServiceImpl::RecieveGossip(grpc::ServerContext *context, const zera_validator::TXNGossip *request, google::protobuf::Empty *response)
 {
      // Get the client's IP address
-     std::string peer_info = context->peer();
-     std::string client_ip;
- 
-     // Extract the IP address from the peer info
-     size_t pos = peer_info.find(":");
-     if (pos != std::string::npos)
-     {
-         client_ip = peer_info.substr(0, pos); // Extract everything before the first colon
-     }
-     else
-     {
-         client_ip = peer_info; // Fallback if no colon is found
-     }
-     
+     std::string client_ip = extract_ip_from_peer(context->peer());
+
      if(!rate_limiter.canProceed(client_ip))
      {
         logging::print("Rate limit exceeded for IP: " + client_ip, true);
@@ -364,19 +354,7 @@ grpc::Status ValidatorServiceImpl::RecieveGossip(grpc::ServerContext *context, c
 grpc::Status ValidatorServiceImpl::StreamGossip(grpc::ServerContext *context, grpc::ServerReader<zera_validator::DataChunk> *reader, google::protobuf::Empty *response)
 {
     // Get the client's IP address
-    std::string peer_info = context->peer();
-    std::string client_ip;
-
-    // Extract the IP address from the peer info
-    size_t pos = peer_info.find(":");
-    if (pos != std::string::npos)
-    {
-        client_ip = peer_info.substr(0, pos); // Extract everything before the first colon
-    }
-    else
-    {
-        client_ip = peer_info; // Fallback if no colon is found
-    }
+    std::string client_ip = extract_ip_from_peer(context->peer());
 
     if(!rate_limiter.canProceed(client_ip))
     {
@@ -389,8 +367,29 @@ grpc::Status ValidatorServiceImpl::StreamGossip(grpc::ServerContext *context, gr
 
     zera_validator::DataChunk chunk;
     std::vector<zera_validator::DataChunk> chunks;
+
+    // These chunks are buffered in full BEFORE the gossip payload is parsed/validated,
+    // so cap total bytes, chunk count, and wall-clock time INSIDE the loop. Otherwise any
+    // peer that can reach the P2P port can stream data indefinitely (or trickle it
+    // slowloris style) and force unbounded allocation before validation runs (CWE-400).
+    size_t total_bytes = 0;
+    const auto stream_deadline = std::chrono::steady_clock::now() +
+                                 std::chrono::seconds(INBOUND_STREAM_DEADLINE_SECONDS);
     while (reader->Read(&chunk))
     {
+        total_bytes += chunk.chunk_data().size();
+
+        if (total_bytes > MAX_BROADCAST_STREAM_BYTES ||
+            chunks.size() >= static_cast<size_t>(MAX_INBOUND_STREAM_CHUNKS) ||
+            std::chrono::steady_clock::now() > stream_deadline)
+        {
+            logging::print("StreamGossip: peer exceeded stream limits, aborting. bytes: " +
+                               std::to_string(total_bytes) + " chunks: " + std::to_string(chunks.size() + 1),
+                           false);
+            delete txn;
+            return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, "gossip stream exceeded size/chunk/time limits");
+        }
+
         chunks.push_back(chunk);
     }
 

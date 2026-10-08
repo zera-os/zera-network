@@ -6,6 +6,7 @@
 #include <thread>
 #include "../logging/logging.h"
 #include "fees.h"
+#include "fee_payer.h"
 
 ZeraStatus block_process::check_nonce(const zera_txn::PublicKey &public_key, const uint64_t &txn_nonce, const std::string &txn_hash, bool sc_txn)
 {
@@ -161,6 +162,16 @@ ZeraStatus block_process::process_txn(const TXType *txn, zera_txn::TXNStatusFees
         {
             return status;
         }
+
+        // Third-party fee payer: the sponsor wallet must also advance its own nonce.
+        if (fee_payer::has(txn->base()))
+        {
+            status = block_process::check_nonce_adr(fee_payer::payer_wallet(txn->base()), txn->base().fee_payer().nonce(), txn->base().hash());
+            if (!status.ok())
+            {
+                return status;
+            }
+        }
     }
     uint256_t fee_amount;
     status = zera_fees::process_simple_fees(txn, status_fees, txn_type, fee_address, sc_txn, sc_fee_address);
@@ -191,6 +202,12 @@ ZeraStatus block_process::process_txn(const TXType *txn, zera_txn::TXNStatusFees
     if(!sc_txn)
     {
         nonce_tracker::add_nonce(wallet_adr, nonce, txn->base().hash());
+
+        // Advance the sponsor's nonce as well when a third-party fee payer is present.
+        if (fee_payer::has(txn->base()))
+        {
+            nonce_tracker::add_nonce(fee_payer::payer_wallet(txn->base()), txn->base().fee_payer().nonce(), txn->base().hash());
+        }
     }
 
     if (!status.ok())

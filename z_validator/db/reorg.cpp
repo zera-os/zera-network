@@ -1,4 +1,9 @@
 #include "reorg.h"
+#include "safe_restore.h"
+#include "database_inventory.h"
+#include <memory>
+#include <mutex>
+#include <algorithm>
 
 #include <iostream>
 #include <filesystem>
@@ -10,24 +15,36 @@
 #include "db_base.h"
 #include "validator_network_client.h"
 #include "validator.pb.h"
+#include "signatures.h"
+#include "validators.h"
+#include "hashing.h"
 #include "../logging/logging.h"
 
 // Initialize the static atomic variable
 std::atomic<bool> Reorg::is_in_progress{false};
+namespace { std::mutex recovery_mutex; }
 
 void Reorg::remove_old_backups(const std::string &block_height)
 {
+    std::lock_guard<std::mutex> lock(recovery_mutex);
+    if (is_in_progress.load()) return;
     try
     {
+        // The reorgs directory may not exist yet on a fresh node.
+        std::filesystem::create_directories(DB_REORGS);
+
+        if (block_height.empty() || !std::all_of(block_height.begin(), block_height.end(), [](unsigned char c) { return c >= '0' && c <= '9'; })) return;
         uint64_t current_block_height = std::stoull(block_height);
+        if (current_block_height < 3) return; // Avoid unsigned underflow pruning every backup.
 
         for (const auto &entry : std::filesystem::directory_iterator(DB_REORGS))
         {
-            if (entry.is_directory())
+            if (!entry.is_symlink() && entry.is_directory())
             {
                 std::string backup_name = entry.path().filename().string();
                 try
                 {
+                    if (backup_name.empty() || !std::all_of(backup_name.begin(), backup_name.end(), [](unsigned char c) { return c >= '0' && c <= '9'; })) continue;
                     uint64_t backup_block_height = std::stoull(backup_name);
 
                     if (backup_block_height <= (current_block_height - 3))
@@ -54,23 +71,21 @@ void Reorg::remove_old_backups(const std::string &block_height)
 
 void Reorg::reorg_blockchain()
 {
+    if (is_in_progress.load() || ValidatorConfig::get_shutdown()) return;
     std::string block_height;
-    db_confirmed_blocks::get_single(CONFIRMED_BLOCK_LATEST, block_height);
-    is_in_progress.store(true);
-    restore_database(block_height, 1);
-
-    // Shutdown triggered.
-    if (ValidatorConfig::get_shutdown())
-    {
+    if (!db_confirmed_blocks::get_single(CONFIRMED_BLOCK_LATEST, block_height)) {
+        is_in_progress.store(true);
+        ValidatorConfig::set_shutdown(true);
+        logging::critical("Cannot find confirmed height for reorg; stopping with all data preserved.");
         return;
     }
-
-    is_in_progress.store(false);
-    ValidatorNetworkClient::StartSyncBlockchain();
+    request_restore(block_height, 1);
 }
 
 void Reorg::backup_blockchain(const std::string &block_height)
 {
+    std::lock_guard<std::mutex> lock(recovery_mutex);
+    if (is_in_progress.load()) return;
     db_headers::backup_database(block_height);
     db_blocks::backup_database(block_height);
     db_contract_supply::backup_database(block_height);
@@ -137,6 +152,8 @@ void Reorg::backup_blockchain(const std::string &block_height)
 
 void Reorg::checkpoint_blockchain(const std::string &version, const zera_validator::BlockHeader &header)
 {
+    std::lock_guard<std::mutex> lock(recovery_mutex);
+    if (is_in_progress.load()) return;
     // 1. Checkpoint all individual databases
     db_headers::checkpoint_database(version);
     db_blocks::checkpoint_database(version);
@@ -218,6 +235,16 @@ void Reorg::checkpoint_blockchain(const std::string &version, const zera_validat
 
         uint64_t file_size = std::filesystem::file_size(tar_file);
 
+        // Hash the archive so downloaders can verify the exact bytes they received,
+        // and sign the whole CheckpointInfo with this validator's original key so a
+        // new validator can pin the expected signer and detect a tampered checkpoint.
+        std::vector<uint8_t> file_hash = Hashing::sha256_hash_file(tar_file);
+        if (file_hash.empty())
+        {
+            logging::error("Cannot store checkpoint info - failed to hash tar file: " + tar_file);
+            return;
+        }
+
         // Create and store CheckpointInfo
         zera_validator::CheckpointInfo checkpoint_info;
         checkpoint_info.set_version(version);
@@ -225,6 +252,9 @@ void Reorg::checkpoint_blockchain(const std::string &version, const zera_validat
         checkpoint_info.set_block_hash(header.hash());
         checkpoint_info.set_total_size(file_size);
         checkpoint_info.mutable_created_at()->set_seconds(header.timestamp().seconds());
+        checkpoint_info.set_file_hash(std::string(file_hash.begin(), file_hash.end()));
+        checkpoint_info.mutable_public_key()->set_single(ValidatorConfig::get_public_key());
+        signatures::sign_checkpoint_info(&checkpoint_info, ValidatorConfig::get_key_pair());
 
         std::string checkpoint_key = CHECKPOINT_INFO + version;
         std::string latest_key = CHECKPOINT_INFO + "latest";
@@ -238,98 +268,111 @@ void Reorg::checkpoint_blockchain(const std::string &version, const zera_validat
     }
 }
 
-void Reorg::restore_database(const std::string &block_height, int code)
+namespace
 {
-    std::string reorg_path = DB_REORGS;
-    std::string block_path = DB_DIRECTORY;
+    std::unique_ptr<safe_restore::DataDirectoryLock> data_directory_lock;
+    std::filesystem::path last_restore_archive;
+    bool databases_opened = false;
 
-    std::filesystem::remove_all(reorg_path);
-    std::filesystem::remove_all(block_path);
-
-    db_headers::restore_database(block_height, code);
-    db_blocks::restore_database(block_height, code);
-    db_contract_supply::restore_database(block_height, code);
-    db_contracts::restore_database(block_height, code);
-    db_hash_index::restore_database(block_height, code);
-    db_transactions::restore_database(block_height, code);
-    db_validators::restore_database(block_height, code);
-    db_wallets::restore_database(block_height, code);
-    db_wallets_temp::restore_database(block_height, code);
-    db_smart_contracts::restore_database(block_height, code);
-    db_restricted_wallets::restore_database(block_height, code);
-    db_block_txns::restore_database(block_height, code);
-    db_contract_items::restore_database(block_height, code);
-    db_validator_lookup::restore_database(block_height, code);
-    db_validator_unbond::restore_database(block_height, code);
-    db_proposal_ledger::restore_database(block_height, code);
-    db_proposals::restore_database(block_height, code);
-    db_status_fee::restore_database(block_height, code);
-    db_process_ledger::restore_database(block_height, code);
-    db_process_adaptive_ledger::restore_database(block_height, code);
-    db_expense_ratio::restore_database(block_height, code);
-    db_proposal_wallets::restore_database(block_height, code);
-    db_proposals_temp::restore_database(block_height, code);
-    db_delegate_vote::restore_database(block_height, code);
-    db_delegate_recipient::restore_database(block_height, code);
-    db_timed_txns::restore_database(block_height, code);
-    db_quash_lookup::restore_database(block_height, code);
-    db_quash_ledger::restore_database(block_height, code);
-    db_wallet_lookup::restore_database(block_height, code);
-    db_delegate_wallets::restore_database(block_height, code);
-    db_fast_quorum::restore_database(block_height, code);
-    db_duplicate_txn::restore_database(block_height, code);
-    db_delegatees::restore_database(block_height, code);
-    db_voted_proposals::restore_database(block_height, code);
-    db_wallet_nonce::restore_database(block_height, code);
-    db_processed_txns::restore_database(block_height, code);
-    db_processed_wallets::restore_database(block_height, code);
-    db_preprocessed_nonce::restore_database(block_height, code);
-    db_validate_txns::restore_database(block_height, code);
-    db_sc_transactions::restore_database(block_height, code);
-    db_gov_txn::restore_database(block_height, code);
-    db_contract_price::restore_database(block_height, code);
-    db_attestation::restore_database(block_height, code);
-    db_confirmed_blocks::restore_database(block_height, code);
-    db_attestation_ledger::restore_database(block_height, code);
-    db_validator_archive::restore_database(block_height, code);
-    db_quash_ledger_lookup::restore_database(block_height, code);
-    db_system::restore_database(block_height, code);
-    db_gossip::restore_database(block_height, code);
-    db_sc_temp::restore_database(block_height, code);
-    db_allowance::restore_database(block_height, code);
-    db_sc_subscriber::restore_database(block_height, code);
-    db_event_management::restore_database(block_height, code);
-    db_fee_tokens::restore_database(block_height, code);
-    db_fee_tokens_temp::restore_database(block_height, code);
-    db_staked_coins_voted::restore_database(block_height, code);
-    db_staked_coins_voted_temp::restore_database(block_height, code);
-    db_smart_contract_states::restore_database(block_height, code);
-
-
-    db_preprocessed_nonce::remove_all();
-    db_processed_wallets::remove_all();
-    db_processed_txns::remove_all();
-    db_proposals_temp::remove_all();
-    db_fast_quorum::remove_all();
-    db_transactions::remove_all();
-    db_wallets_temp::remove_all();
-    db_gossip::remove_all();
-    db_fee_tokens_temp::remove_all();
-    db_sc_subscriber::remove_all();
-
-
-    std::vector<std::string> keys;
-    std::vector<std::string> values;
-    db_wallet_nonce::get_all_data(keys, values);
-
-    int x = 0;
-    rocksdb::WriteBatch batch;
-    while (x < keys.size())
+    std::filesystem::path restore_source(const std::string& identifier, int code)
     {
-        batch.Put(keys.at(x), values.at(x));
-        x++;
+        if (!safe_restore::safe_component(identifier))
+            throw std::runtime_error("Invalid restore snapshot identifier");
+        switch (code) {
+            case 0: return std::filesystem::path(DB_COPY) / identifier;
+            case 1: return std::filesystem::path(DB_REORGS) / identifier;
+            case 2: return std::filesystem::path(DB_CHECKPOINTS) / identifier;
+            default: throw std::runtime_error("Invalid restore code");
+        }
     }
-    db_preprocessed_nonce::store_batch(batch);
 
-    logging::print("Restore completed for block height:", block_height);
+    void validate_snapshot_database(const std::filesystem::path& path)
+    {
+        rocksdb::Options options;
+        options.create_if_missing = false;
+        options.paranoid_checks = true;
+        rocksdb::DB* raw = nullptr;
+        auto status = rocksdb::DB::OpenForReadOnly(options, path.string(), &raw);
+        std::unique_ptr<rocksdb::DB> database(raw);
+        if (!status.ok()) throw std::runtime_error("Cannot read staged database " + path.string() + ": " + status.ToString());
+        status = database->VerifyChecksum();
+        if (!status.ok()) throw std::runtime_error("Corrupt staged database " + path.string() + ": " + status.ToString());
+    }
+}
+
+bool Reorg::restore_database(const std::string& identifier, int code)
+{
+    // Filesystem replacement is only permitted before RocksDB handles/workers exist.
+    if (databases_opened || !data_directory_lock) {
+        logging::critical("Restore refused while databases are open; request a restart-based restore instead.");
+        ValidatorConfig::set_shutdown(true);
+        return false;
+    }
+    try {
+        std::vector<std::string> names;
+#define ADD_DATABASE_NAME(DB) names.emplace_back(DB##_tag::DB_NAME);
+        ZERA_DATABASES(ADD_DATABASE_NAME)
+#undef ADD_DATABASE_NAME
+        const auto result = safe_restore::restore(DATA_DIR, restore_source(identifier, code), names, validate_snapshot_database);
+        if (!result.ok) throw std::runtime_error(result.error + "; retained evidence: " + result.retained.string());
+        last_restore_archive = result.retained;
+        logging::print("Restore completed for snapshot:", identifier, "Previous data retained at: " + result.retained.string(), true);
+        return true;
+    } catch (const std::exception& error) {
+        logging::critical("Restore failed; refusing to open databases: " + std::string(error.what()));
+        ValidatorConfig::set_shutdown(true);
+        return false;
+    }
+}
+
+void Reorg::mark_databases_open()
+{
+    databases_opened = true;
+}
+
+bool Reorg::recover_before_open()
+{
+    try {
+        data_directory_lock = std::make_unique<safe_restore::DataDirectoryLock>(DATA_DIR);
+        safe_restore::check_no_interrupted_restore(DATA_DIR);
+        const auto pending = std::filesystem::path(DATA_DIR) / "restore.pending";
+        if (std::filesystem::symlink_status(pending).type() != std::filesystem::file_type::not_found) {
+            if (std::filesystem::is_symlink(pending) || !std::filesystem::is_regular_file(pending) || std::filesystem::file_size(pending) > 512)
+                throw std::runtime_error("Invalid pending restore record");
+            std::ifstream file(pending);
+            int code;
+            std::string identifier, extra;
+            if (!(file >> code >> identifier) || (file >> extra)) throw std::runtime_error("Incomplete pending restore record");
+            if (!restore_database(identifier, code)) return false;
+            std::filesystem::rename(pending, last_restore_archive / "request.txt");
+            safe_restore::sync_path(DATA_DIR);
+            safe_restore::sync_path(last_restore_archive);
+            return true;
+        }
+        const auto configured = ValidatorConfig::get_block_height();
+        if (!configured.empty() && configured != "NONE") return restore_database(configured, 0);
+        return true;
+    } catch (const std::exception& error) {
+        logging::critical("Recovery requires operator attention; data preserved: " + std::string(error.what()));
+        ValidatorConfig::set_shutdown(true);
+        return false;
+    }
+}
+
+bool Reorg::request_restore(const std::string& identifier, int code)
+{
+    std::lock_guard<std::mutex> lock(recovery_mutex);
+    if (is_in_progress.load()) return false;
+    is_in_progress.store(true);
+    ValidatorConfig::set_shutdown(true);
+    try {
+        restore_source(identifier, code); // Validate before writing the request.
+        const auto pending = std::filesystem::path(DATA_DIR) / "restore.pending";
+        safe_restore::write_new_file(pending, std::to_string(code) + "\n" + identifier + "\n");
+        logging::print("Restore scheduled for restart; existing databases and backups preserved. Snapshot:", identifier, true);
+        return true;
+    } catch (const std::exception& error) {
+        logging::critical("Could not schedule restore; stopping without replacing data: " + std::string(error.what()));
+        return false;
+    }
 }

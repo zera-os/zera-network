@@ -25,6 +25,7 @@ int database::open_db(rocksdb::DB*& db, rocksdb::Options& options, const std::st
 
 void database::close_db(rocksdb::DB*& db)
 {
+    if (db == nullptr) return;
     commit(db);
     delete db;
     db = nullptr;

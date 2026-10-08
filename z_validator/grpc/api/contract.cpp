@@ -8,6 +8,11 @@
 
 grpc::Status APIImpl::RecieveRequestContract(grpc::ServerContext *context, const zera_api::ContractRequest *request, zera_api::ContractResponse *response)
 {
+    if (!check_rate_limit(context))
+    {
+        return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, "Rate limit exceeded");
+    }
+
     std::string contract_data;
     if(db_contracts::get_single(request->contract_id(), contract_data))
     {

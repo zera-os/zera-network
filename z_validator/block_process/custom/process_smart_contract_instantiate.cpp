@@ -9,18 +9,40 @@
 #include "fees.h"
 #include "hex_conversion.h"
 #include "validator_api_client.h"
+#include "utils.h"
 #include <algorithm>
+#include <map>
+#include <set>
 
 namespace
 {
-    void storage_fees(const zera_txn::SmartContractInstantiateTXN *txn, const uint256_t &fees, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
+    // Convert a gas amount into its fee-currency value (same conversion gas_fees
+    // uses to charge), for informational reporting on smart contract events.
+    uint256_t gas_to_value(const zera_txn::SmartContractInstantiateTXN *txn, const uint64_t &gas)
     {
         uint256_t usd_equiv;
+        std::string contract_id = txn->base().fee_id();
         zera_txn::InstrumentContract contract;
 
-        auto wallet_adr = wallets::generate_wallet(txn->base().public_key());
+        if (gas == 0 || !zera_fees::get_cur_equiv(contract_id, usd_equiv) || usd_equiv == 0)
+        {
+            return 0;
+        }
 
-        zera_fees::process_fees(contract, fees, wallet_adr, txn->base().fee_id(), true, status_fees, txn->base().hash(), fee_address, true);
+        block_process::get_contract(contract_id, contract);
+        uint256_t denomination(contract.coin_denomination().amount());
+        uint256_t gas_fee_value;
+
+        if (contract_id != NETWORK_CONTRACT)
+        {
+            gas_fee_value = gas * (get_fee("GAS_FEE") * get_fee("TOKEN_MULTIPLIER"));
+        }
+        else
+        {
+            gas_fee_value = gas * get_fee("GAS_FEE");
+        }
+
+        return (gas_fee_value * denomination) / usd_equiv;
     }
 
     ZeraStatus gas_fees(const zera_txn::SmartContractInstantiateTXN *txn, const uint64_t &used_gas, zera_txn::TXNStatusFees &status_fees, const std::string &fee_address)
@@ -89,7 +111,7 @@ namespace
         return balance_tracker::subtract_txn_balance(wallet_adr, contract_id, fee_left, txn->base().hash());
     }
 
-    ZeraStatus instantiate(const zera_txn::SmartContractInstantiateTXN *txn, const std::string &fee_address, const uint64_t &gas_approved, uint64_t &used_gas, std::vector<std::string> &txn_hashes, zera_txn::TXNStatusFees &status_fees, std::vector<zera_api::SmartContractEventsResponse> &events)
+    ZeraStatus instantiate(const zera_txn::SmartContractInstantiateTXN *txn, const std::string &fee_address, const uint64_t &gas_approved, uint64_t &used_gas, std::vector<std::string> &txn_hashes, zera_txn::TXNStatusFees &status_fees, std::vector<zera_api::SmartContractEventsResponse> &events, uint64_t &storage_gas, uint64_t &txn_fee_gas)
     {
         ZeraStatus status1 = zera_fees::process_interface_fees(txn->base(), status_fees);
         if (!status1.ok())
@@ -112,6 +134,10 @@ namespace
             }
             else if (type == "int")
             {
+                if (param.value().size() < sizeof(int))
+                {
+                    return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_smart_contract_instantiate.cpp: instantiate: int parameter too short", zera_txn::TXN_STATUS::INVALID_PARAMETERS);
+                }
                 int val;
                 std::memcpy(&val, value, sizeof(int));
                 params_vector.push_back(val);
@@ -161,6 +187,46 @@ namespace
         std::map<std::string, std::string> derived_wallets;
         std::map<std::string, BlockEmitType> block_emits;
         bool panic = false;
+
+        // Build the user-signed per-execution outflow allowance budget. Duplicate
+        // contract_id entries sum; an explicit "unlimited" wins over a capped entry
+        // for the same token. Invalid amounts make the whole txn invalid.
+        std::map<std::string, std::string> allowance_remaining;
+        std::set<std::string> allowance_unlimited;
+        bool allowance_provided = txn->allowances_size() > 0;
+        for (const auto &allowance : txn->allowances())
+        {
+            const std::string &allowance_token = allowance.contract_id();
+
+            if (allowance.unlimited())
+            {
+                allowance_unlimited.insert(allowance_token);
+                allowance_remaining.erase(allowance_token);
+                continue;
+            }
+
+            if (allowance_unlimited.count(allowance_token))
+            {
+                continue;
+            }
+
+            const std::string &allowance_amount = allowance.allowed_amount();
+            if (!is_valid_uint256(allowance_amount))
+            {
+                return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "invalid smart contract allowance amount", zera_txn::TXN_STATUS::INVALID_PARAMETERS);
+            }
+
+            auto existing = allowance_remaining.find(allowance_token);
+            if (existing == allowance_remaining.end())
+            {
+                allowance_remaining[allowance_token] = allowance_amount;
+            }
+            else
+            {
+                allowance_remaining[allowance_token] = (uint256_t(existing->second) + uint256_t(allowance_amount)).str();
+            }
+        }
+
         try
         {
             std::vector<std::any> results = smart_contract_service::eval(sender_pub_key, sender_wallet_adr,
@@ -170,7 +236,8 @@ namespace
                                          txn->base().hash(), timestamp,
                                          block_txns_key, fee_address,
                                          smart_contract_wallet, gas_approved,
-                                         used_gas, txn_hashes, derived_wallets, txn->base().fee_id(), block_emits, panic);
+                                         used_gas, txn_hashes, derived_wallets, txn->base().fee_id(), block_emits, panic, storage_gas, txn_fee_gas,
+                                         allowance_remaining, allowance_unlimited, allowance_provided);
 
             // store result
             std::vector<std::string> vector_results;
@@ -342,102 +409,130 @@ ZeraStatus block_process::process_txn<zera_txn::SmartContractInstantiateTXN>(con
     logging::print("[ProcessSmartContractInstantiate] instantiating smart contract...", txn->smart_contract_name());
     logging::print("instance:", std::to_string(txn->instance()), true);
 
-    uint64_t nonce = txn->base().nonce();
-    ZeraStatus status;
-
-    // timed txns do need to check nonce, they have already been checked on the original txn
-    if (!timed)
+    // Network safety net: any uncaught exception below (e.g. uint256_t /
+    // boost::multiprecision parse errors from malformed fee strings) must
+    // NOT terminate the validator. Catch everything and surface as a
+    // failed txn instead.
+    try
     {
-        // check nonce, if its bad return failed txn
-        status = block_process::check_nonce(txn->base().public_key(), nonce, txn->base().hash(), sc_txn);
+        uint64_t nonce = txn->base().nonce();
+        ZeraStatus status;
 
+        // timed txns do need to check nonce, they have already been checked on the original txn
+        if (!timed)
+        {
+            // check nonce, if its bad return failed txn
+            status = block_process::check_nonce(txn->base().public_key(), nonce, txn->base().hash(), sc_txn);
+
+            if (!status.ok())
+            {
+                return status;
+            }
+        }
+
+        // only check restricted keys if not timed, original txn has already been checked if it is timed
+        if (!timed)
+        {
+            // this checks to see if the key is valid to send this type of txn, also checks to see if key is from a validator, which is not allowed
+            std::string pub_key = wallets::get_public_key_string(txn->base().public_key());
+            status = block_process::check_validator(pub_key, txn_type);
+
+            if (!status.ok())
+            {
+                return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.message(), zera_txn::TXN_STATUS::INVALID_TXN_DATA);
+            }
+        }
+
+        // Guard fee_amount before it reaches any uint256_t constructor
+        // (process_simple_fees_gas -> calculate_fees and fee_approved below).
+        // cpp_int's parser throws std::runtime_error("Unexpected character
+        // encountered in input") on any non-digit, which would otherwise
+        // propagate up unhandled and terminate the node.
+        if (!is_valid_uint256(txn->base().fee_amount()))
+        {
+            return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "process_smart_contract_instantiate.cpp: process_txn: invalid fee_amount", zera_txn::TXN_STATUS::INVALID_TXN_DATA);
+        }
+
+        uint256_t fee_taken = 0;
+
+        // process base fees. If wallet cannot pay fees or anything else is wrong with the fees return failed txn
+        status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_INSTANTIATE_TYPE, fee_taken, fee_address, sc_txn, sc_fee_address);
         if (!status.ok())
         {
             return status;
         }
-    }
 
-    // only check restricted keys if not timed, original txn has already been checked if it is timed
-    if (!timed)
-    {
-        // this checks to see if the key is valid to send this type of txn, also checks to see if key is from a validator, which is not allowed
-        std::string pub_key = wallets::get_public_key_string(txn->base().public_key());
-        status = block_process::check_validator(pub_key, txn_type);
+        uint64_t gas_approved;
+        uint256_t fee_approved(txn->base().fee_amount());
+        uint256_t fee_left = fee_approved - fee_taken;
+        uint64_t used_gas = 0;
+        std::string sender_wallet_adr = wallets::generate_wallet(txn->base().public_key());
+
+        status = gas_limit_calc(fee_taken, txn, gas_approved, fee_left);
+        std::vector<std::string> txn_hashes;
+        uint64_t storage_gas = 0;
+        uint64_t txn_fee_gas = 0;
+
+        if (status.ok())
+        {
+            std::vector<zera_api::SmartContractEventsResponse> events;
+            status = instantiate(txn, fee_address, gas_approved, used_gas, txn_hashes, status_fees, events, storage_gas, txn_fee_gas);
+            balance_tracker::add_txn_balance(sender_wallet_adr, txn->base().fee_id(), fee_left, txn->base().hash());
+
+            // Storage (emit) fees and internal txn network fees are metered as gas
+            // pulled from the approved budget. Charge them together with the compute
+            // gas, but only on success. On a crash/terminate they are dropped
+            // (refunded), so only the compute gas is billed (base txn fee is kept).
+            uint64_t chargeable_gas = used_gas;
+            if (status.ok())
+            {
+                chargeable_gas += storage_gas + txn_fee_gas;
+            }
+
+            // Report the full gas billed (compute + storage + internal txn fees) so
+            // the block's gas field matches what the wallet was charged via gas_fees.
+            status_fees.set_gas(chargeable_gas);
+
+            if (chargeable_gas > 0)
+            {
+                gas_fees(txn, chargeable_gas, status_fees, fee_address);
+            }
+
+            uint256_t storage_fee_value = status.ok() ? gas_to_value(txn, storage_gas) : uint256_t(0);
+
+            for (auto &event : events)
+            {
+                if (event.has_caller())
+                {
+                    event.set_storage_fee(storage_fee_value.str());
+                    ValidatorAPIClient::StageEvent(event);
+                }
+            }
+        }
 
         if (!status.ok())
         {
-            return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.message(), zera_txn::TXN_STATUS::INVALID_TXN_DATA);
+            logging::print("block_process::process_txn:", status.read_status());
         }
-    }
 
-    uint256_t fee_taken = 0;
-
-    // process base fees. If wallet cannot pay fees or anything else is wrong with the fees return failed txn
-    status = zera_fees::process_simple_fees_gas(txn, status_fees, zera_txn::TRANSACTION_TYPE::SMART_CONTRACT_INSTANTIATE_TYPE, fee_taken, fee_address, sc_txn, sc_fee_address);
-    if (!status.ok())
-    {
-        return status;
-    }
-
-    uint64_t gas_approved;
-    uint256_t fee_approved(txn->base().fee_amount());
-    uint256_t fee_left = fee_approved - fee_taken;
-    uint64_t used_gas = 0;
-    std::string sender_wallet_adr = wallets::generate_wallet(txn->base().public_key());
-
-    status = gas_limit_calc(fee_taken, txn, gas_approved, fee_left);
-    std::vector<std::string> txn_hashes;
-
-    if (status.ok())
-    {
-        std::vector<zera_api::SmartContractEventsResponse> events;
-        status = instantiate(txn, fee_address, gas_approved, used_gas, txn_hashes, status_fees, events);
-        status_fees.set_gas(used_gas);
-        balance_tracker::add_txn_balance(sender_wallet_adr, txn->base().fee_id(), fee_left, txn->base().hash());
-
-        std::string storage_key = "STORAGE_FEE_" + txn->smart_contract_name() + "_" + std::to_string(txn->instance());
-        std::string storage_data;
-
-        uint256_t total_fee = 0;
-        logging::print("storage_key: instantiate:", storage_key);
-        if (db_smart_contracts::get_single(storage_key, storage_data))
+        status_fees.set_status(status.txn_status());
+        if (!sc_txn)
         {
-            logging::print("storage_data: execute:", storage_data);
-
-            if (is_valid_uint256(storage_data))
-            {
-                total_fee = boost::lexical_cast<uint256_t>(storage_data);
-            }
-
-            storage_fees(txn, total_fee, status_fees, fee_address);
-            db_smart_contracts::remove_single(storage_key);
+            nonce_tracker::add_nonce(sender_wallet_adr, nonce, txn->base().hash());
         }
 
-        if (used_gas > 0)
-        {
-            gas_fees(txn, used_gas, status_fees, fee_address);
-        }
-
-        for (auto &event : events)
-        {
-            if (event.has_caller())
-            {
-                event.set_storage_fee(total_fee.str());
-                ValidatorAPIClient::StageEvent(event);
-            }
-        }
+        return ZeraStatus();
     }
-
-    if (!status.ok())
+    catch (const std::exception &e)
     {
-        logging::print("block_process::process_txn:", status.read_status());
+        logging::print("[ProcessSmartContractInstantiate] FATAL exception caught (safety net):", e.what(), true);
+        status_fees.set_status(zera_txn::TXN_STATUS::SMART_CONTRACT_CRASH);
+        return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, std::string("uncaught exception: ") + e.what(), zera_txn::TXN_STATUS::SMART_CONTRACT_CRASH);
     }
-
-    status_fees.set_status(status.txn_status());
-    if (!sc_txn)
+    catch (...)
     {
-        nonce_tracker::add_nonce(sender_wallet_adr, nonce, txn->base().hash());
+        logging::print("[ProcessSmartContractInstantiate] FATAL unknown exception caught (safety net)", true);
+        status_fees.set_status(zera_txn::TXN_STATUS::SMART_CONTRACT_CRASH);
+        return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "uncaught unknown exception", zera_txn::TXN_STATUS::SMART_CONTRACT_CRASH);
     }
-
-    return ZeraStatus();
 }

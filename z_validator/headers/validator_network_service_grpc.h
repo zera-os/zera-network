@@ -132,19 +132,7 @@ private:
     grpc::Status RecieveRequest(grpc::ServerContext *context, const TXType *request, google::protobuf::Empty *response)
     {
         // Get the client's IP address
-        std::string peer_info = context->peer();
-        std::string client_ip;
-
-        // Extract the IP address from the peer info
-        size_t pos = peer_info.find(":");
-        if (pos != std::string::npos)
-        {
-            client_ip = peer_info.substr(0, pos); // Extract everything before the first colon
-        }
-        else
-        {
-            client_ip = peer_info; // Fallback if no colon is found
-        }
+        std::string client_ip = extract_ip_from_peer(context->peer());
 
         if (!rate_limiter.canProceed(client_ip))
         {
@@ -184,10 +172,31 @@ private:
     template <typename TXType>
     static void ProcessRequest(const TXType *request, std::string client_ip)
     {
+        // Verify signature + hash before anything is stored or preprocessed.
+        // This mirrors the client submission path (client_network_service.h) so both
+        // ingress paths share the same verifier. Without this gate, any peer that can
+        // reach the P2P port could inject forged txns into local preprocessing.
+        ZeraStatus status = verify_txns::verify_txn(request);
 
+        if (!status.ok())
+        {
+            status.prepend_message("validator_network_service: ProcessRequest");
+
+            // Duplicates are expected from legitimate peers re-forwarding txns; drop quietly.
+            if (status.code() != ZeraStatus::Code::DUPLICATE_TXN_ERROR)
+            {
+                logging::print(status.read_status());
+                rate_limiter.processUpdate(client_ip, true);
+            }
+
+            // RecieveRequest registered this hash before verification; release it so a
+            // forged txn cannot permanently squat the hash of a legitimate in-flight txn.
+            recieved_txn_tracker::remove_txn(request->base().hash());
+            return;
+        }
 
         zera_txn::TRANSACTION_TYPE txn_type;
-        ZeraStatus status = verify_txns::store_txn(request, txn_type);
+        status = verify_txns::store_txn(request, txn_type);
 
         // if (txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_REGISTRATION_TYPE && txn_type != zera_txn::TRANSACTION_TYPE::VALIDATOR_HEARTBEAT_TYPE)
         // {

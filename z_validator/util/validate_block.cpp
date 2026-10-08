@@ -10,6 +10,7 @@
 #include "../logging/logging.h"
 #include "../temp_data/temp_data.h"
 #include "validator_api_client.h"
+#include "verify_process_txn.h"
 
 namespace
 {
@@ -47,14 +48,17 @@ namespace
         result->mutable_base()->mutable_timestamp()->set_seconds(original_result->base().timestamp().seconds());
         result->mutable_base()->mutable_public_key()->set_single(original_result->base().public_key().single());
         result->mutable_base()->set_signature(original_result->base().signature());
-        auto old_hash = result->mutable_base()->release_hash();
+        // Copy + clear instead of release_hash(): release leaks the returned string
+        // and returns nullptr when the field is unset.
+        std::string old_hash = result->base().hash();
+        result->mutable_base()->clear_hash();
         auto hash_vec = Hashing::sha256_hash(result->SerializeAsString());
         std::string hash(hash_vec.begin(), hash_vec.end());
         result->mutable_base()->set_hash(hash);
 
         for (auto &status : *block->mutable_transactions()->mutable_txn_fees_and_status())
         {
-            if (status.txn_hash() == *old_hash)
+            if (status.txn_hash() == old_hash)
             {
                 status.set_txn_hash(hash);
             }
@@ -772,10 +776,14 @@ namespace
         zera_validator::BlockHeader *header = block_copy.mutable_block_header();
 
         std::string key;
-        block_copy.release_signature();
-        block_copy.release_public_key();
-        std::string *hash_str = header->release_hash();
-        std::vector<uint8_t> hash(hash_str->begin(), hash_str->end());
+        // Copy + clear instead of release_*: release leaks the returned string and
+        // returns nullptr when the field is unset (a synced block missing its header
+        // hash would crash the node on dereference).
+        block_copy.clear_signature();
+        block_copy.clear_public_key();
+        std::string hash_str = header->hash();
+        header->clear_hash();
+        std::vector<uint8_t> hash(hash_str.begin(), hash_str.end());
         std::vector<uint8_t> man_hash = Hashing::sha256_hash(block_copy.SerializeAsString());
 
         if (!Hashing::compare_hash(man_hash, hash))
@@ -783,7 +791,7 @@ namespace
             return ZeraStatus(ZeraStatus::Code::HASH_ERROR, "block_sync_client.cpp: check_block_hash_duplicate: Hash provided and manual hash did not match");
         }
         std::string value;
-        if (db_hash_index::get_single(*hash_str, key))
+        if (db_hash_index::get_single(hash_str, key))
         {
             return ZeraStatus(ZeraStatus::Code::BLOCKCHAIN_DUPLICATE_ERROR, "block_sync_client.cpp: check_block_hash_duplicate: db_hash_index found block, block already exists 1");
         }
@@ -864,6 +872,19 @@ namespace
 
     ZeraStatus process_block(const zera_validator::Block &block, bool broadcast)
     {
+        // Reconstruction below rebuilds the block from its own embedded txns and
+        // re-derives state, but it does not re-check txn signatures (those are only
+        // verified at mempool ingress via verify_txn). Without this pass a malicious
+        // proposer could embed forged-signature txns spending from arbitrary wallets
+        // and the reconstructed block hash would still match. Verify every embedded
+        // user txn's signature/hash before trusting the block.
+        ZeraStatus verify_status = verify_txns::verify_block_txns(block);
+        if (!verify_status.ok())
+        {
+            verify_status.prepend_message("validate_block.cpp: process_block");
+            return verify_status;
+        }
+
         contract_price_tracker::clear_prices();
         transactions txns;
         wrap_block(block, txns, broadcast);
@@ -943,6 +964,7 @@ namespace
 }
 
 std::mutex ValidateBlock::processing_mutex;
+
 
 ZeraStatus ValidateBlock::block_process(const zera_validator::Block &block, bool broadcast)
 {
@@ -1034,24 +1056,24 @@ ZeraStatus ValidateBlock::block_process(const zera_validator::Block &block, bool
         return status;
     }
 
-    if (broadcast)
-    {
-        zera_validator::Block *attestation_block = new zera_validator::Block();
-        attestation_block->CopyFrom(block);
+    zera_validator::Block *attestation_block = new zera_validator::Block();
+    attestation_block->CopyFrom(block);
 
-        try
-        {
-            ValidatorAPIClient::PromoteStagedEventsToPending(block);
-            // Enqueue the task into the thread pool
-            ValidatorThreadPool::enqueueTask([attestation_block]()
-                                             { 
-                AttestationProcess::CreateAttestation(attestation_block); 
-                delete attestation_block; });
-        }
-        catch (const std::exception &e)
-        {
-            std::cerr << e.what() << '\n';
-        }
+    ValidatorAPIClient::PromoteStagedEventsToPending(block);
+
+    try
+    {
+        ValidatorAPIClient::PromoteStagedEventsToPending(block);
+        
+        // Enqueue the task into the thread pool
+        ValidatorThreadPool::enqueueTask([attestation_block]()
+                                         { 
+            AttestationProcess::CreateAttestation(attestation_block); 
+            delete attestation_block; });
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << e.what() << '\n';
     }
 
     return ZeraStatus();

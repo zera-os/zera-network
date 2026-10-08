@@ -6,7 +6,7 @@
 
 
 void debug::startup_logs(){
-    logging::print("----------------Version 1.0.3------------------", false);
+    logging::print("----------------Version 1.0.6------------------", false);
     logging::print("----------------CONFIG------------------", false);
     logging::print("Host:", ValidatorConfig::get_host(), false);
     logging::print("Client Port:", ValidatorConfig::get_client_port(), false);
@@ -17,7 +17,8 @@ void debug::startup_logs(){
     }
     logging::print("Fee Wallet Address:", base58_encode(ValidatorConfig::get_fee_address()), false);
     logging::print("Public Key:", base58_encode_public_key(ValidatorConfig::get_public_key()), false);
-    logging::print("Generated Private Key:", base58_encode(ValidatorConfig::get_gen_private_key()), true);
+    // Never log the generated private key (CWE-532); it is the validator's
+    // block-signing key and is already persisted to GEN_KEY_FILE.
     logging::print("Generated Public Key:", base58_encode_public_key(ValidatorConfig::get_gen_public_key()), false);
     for (auto seed : ValidatorConfig::get_seed_validators())
     {

@@ -289,6 +289,15 @@ message BaseTXN{
     optional string interface_fee = 11;
     optional string interface_fee_id = 12;
     optional bytes interface_address = 13;
+    optional FeePayer fee_payer = 14; //third party that pays this txn's fees (sponsored txns)
+}
+//A third party (sponsor) that agrees to pay the fees for a txn the user already signed.
+//The sponsor signs the entire user-signed txn (user signature included) and provides their
+//own nonce. v1 only accepts this on GovernanceVote txns.
+message FeePayer{
+    PublicKey public_key = 1; //sponsor's public key (single user key in v1)
+    bytes signature = 2;      //sponsor's signature over the user-signed txn (hash + this signature cleared)
+    uint64 nonce = 3;         //sponsor's own nonce (replay protection on the sponsor wallet)
 }
 message PublicKey{
     bytes single = 1;
@@ -483,18 +492,28 @@ message Parameters
     bytes value = 1;
     string type = 2;
 }
+// Per-execution outflow allowance, signed by the user as part of the
+// execute/instantiate txn. Bounds how much of a given token may leave the
+// user's wallet across the entire nested smart contract execution tree.
+message SmartContractAllowance {
+    string contract_id = 1;             // token whose outflow is capped
+    optional string allowed_amount = 2; // max parts of token that may leave the user wallet this execution
+    optional bool unlimited = 3;        // explicit opt-in: no cap for this token
+}
 message SmartContractExecuteTXN{
     BaseTXN base = 1;
     string smart_contract_name = 2;
     uint32 instance = 3;
     string function = 4;
     repeated Parameters parameters = 5;
+    repeated SmartContractAllowance allowances = 6;
 }
 message SmartContractInstantiateTXN{
     BaseTXN base = 1;
     string smart_contract_name = 2;
     uint32 instance = 3;
     repeated Parameters parameters = 4;
+    repeated SmartContractAllowance allowances = 5;
 }
 //key = generated public key
 message Validator{

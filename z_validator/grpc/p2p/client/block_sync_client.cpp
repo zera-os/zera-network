@@ -1,6 +1,7 @@
 // Standard library headers
 #include <string>
 #include <iostream>
+#include <chrono>
 
 // Third-party library headers
 #include "validator.pb.h"
@@ -95,8 +96,12 @@ namespace
     }
     void set_block_sync(BlockSync *block_sync)
     {
+        // Sign with the SAME key whose public half is embedded in the request.
+        // Signing with the original key pair while embedding the gen public key
+        // (the old behavior) produces a request that can never pass the server's
+        // verify_request check.
         block_sync->mutable_public_key()->set_single(ValidatorConfig::get_gen_public_key());
-        signatures::sign_request(block_sync, ValidatorConfig::get_key_pair());
+        signatures::sign_request(block_sync, ValidatorConfig::get_gen_key_pair());
     }
     ZeraStatus unchunk_batch(std::vector<zera_validator::DataChunk> *responses, zera_validator::BlockBatch &batch)
     {
@@ -136,6 +141,10 @@ namespace
 grpc::Status ValidatorNetworkClient::SyncBlockchain(const BlockSync *request, std::vector<zera_validator::DataChunk> *responses)
 {
     grpc::ClientContext context;
+    // Bound how long a single sync stream may run so a malicious/slow peer cannot pin
+    // the sync loop indefinitely (slowloris). Legit 100-block batches finish well within this.
+    context.set_deadline(std::chrono::system_clock::now() + std::chrono::seconds(BLOCK_SYNC_DEADLINE_SECONDS));
+
     // Create a reader for the server-side streaming RPC
     std::unique_ptr<grpc::ClientReader<zera_validator::DataChunk>> reader = stub_->SyncBlockchain(&context, *request);
 
@@ -145,8 +154,26 @@ grpc::Status ValidatorNetworkClient::SyncBlockchain(const BlockSync *request, st
         return grpc::Status::CANCELLED; // or handle error appropriately
     }
     zera_validator::DataChunk batch;
+    size_t total_bytes = 0;
     while (reader->Read(&batch))
     {
+        total_bytes += batch.chunk_data().size();
+
+        // These chunks are buffered in full BEFORE any signature verification, so cap the
+        // total volume a peer can make us hold. A legitimate response is at most BLOCK_SYNC
+        // blocks (~150MB absolute worst case); anything past the cap is a misbehaving or
+        // malicious peer, so abort the stream and let the caller fail over to another peer.
+        if (total_bytes > MAX_BLOCK_SYNC_RESPONSE_BYTES ||
+            responses->size() >= static_cast<size_t>(MAX_BLOCK_SYNC_CHUNKS))
+        {
+            logging::print("SyncBlockchain: peer exceeded block-sync response limits, aborting stream. bytes: " +
+                               std::to_string(total_bytes) + " chunks: " + std::to_string(responses->size() + 1),
+                           false);
+            context.TryCancel();
+            reader->Finish(); // drain/cleanup the cancelled stream
+            return grpc::Status(grpc::StatusCode::RESOURCE_EXHAUSTED, "block sync response exceeded size/chunk limits");
+        }
+
         // Storing each received batch into the responses vector
         try
         {
@@ -232,18 +259,23 @@ bool ValidatorNetworkClient::StartSyncBlockchain(bool seed_sync)
         request.set_amount(BLOCK_SYNC);
         set_block_sync(&request);
         status = client.SyncBlockchain(&request, responses);
-        ZeraStatus z_status = unchunk_batch(responses, response);
-        if (!z_status.ok())
-        {
-            logging::print(z_status.read_status());
-            final_block = false;
-            failed_attempts++;
-        }
-
-        final_block = response.last_block();
 
         if (status.ok())
         {
+            // Only assemble/parse the chunks when the stream completed cleanly; partial
+            // data from an aborted or over-limit stream is never parsed.
+            ZeraStatus z_status = unchunk_batch(responses, response);
+            if (!z_status.ok())
+            {
+                logging::print(z_status.read_status());
+                final_block = false;
+                failed_attempts++;
+                delete responses;
+                continue;
+            }
+
+            final_block = response.last_block();
+
             if(response.blocks().size() > 0)
             {
                 logging::print("Received: " + std::to_string(response.blocks().size()), "blocks from:", host, "Block Height: " +  std::to_string(response.blocks(response.blocks().size() - 1).block_header().block_height()), false);

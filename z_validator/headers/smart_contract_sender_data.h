@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <set>
 #include "block_emit_type.h"
 
 struct SenderDataType
@@ -31,6 +32,9 @@ struct SenderDataType
 
   uint64_t gas_used;                              // Used gas for all calls (increases after every Call/DelegateCall)
   uint64_t gas_available;                         // Available gas for next call (reduces after ever Call/DelegateCall)
+  uint64_t current_cost_limit;                    // Active WasmEdge frame cost limit (cap). Tracked manually since WasmEdge has no GetCostLimit
+  uint64_t storage_gas;                           // Accumulated storage (emit) gas this execution. Charged only on success (refunded on crash)
+  uint64_t txn_fee_gas;                           // Accumulated internal txn network-fee gas this execution. Charged only on success (refunded on crash)
   WasmEdge_VMContext *VMCxt;                      // Original VM context
   std::vector<WasmEdge_StatisticsContext*> Stats; 
   uint64_t sc_nonce;                               // Smart contract nonce (Increases after every txn)
@@ -41,5 +45,15 @@ struct SenderDataType
   std::string current_function; // Current function (Changes every Call/DelegateCall)
   std::string current_smart_contract_instance; // Current smart contract instance (Changes every Call/DelegateCall)
   std::string current_smart_contract_name; // Current smart contract name (Changes every Call/DelegateCall)
-  bool panic;                                 // Panic flag (True if the smart contract panics)
+  bool panic;                              // Panic flag (True if the smart contract panics)
+
+  // Per-execution outflow allowance (user-signed). One budget shared across the
+  // whole nested Call/DelegateCall tree. Amounts are decimal strings (NOT boost
+  // uint256_t) to avoid the uint128_t/int128_t clash between wasmedge.h and
+  // boost/multiprecision; convert to uint256_t only at the enforcement site
+  // (nt_coin.cpp). NOT refunded: on crash/terminate the whole execution reverts
+  // and this in-memory state is discarded.
+  std::map<std::string, std::string> allowance_remaining; // token contract_id -> remaining parts (decimal)
+  std::set<std::string> allowance_unlimited;              // tokens granted explicit unlimited outflow
+  bool allowance_provided;                                // did the signed txn carry any allowances? (reserved)
 };

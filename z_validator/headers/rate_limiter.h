@@ -20,6 +20,36 @@ namespace
     constexpr auto WINDOW_DURATION = minutes(5);
 }
 
+// Turn a gRPC peer string into the bare client address.
+// grpc's context->peer() looks like "ipv4:1.2.3.4:52034" or "ipv6:[::1]:52034".
+// Callers used to take everything before the FIRST colon, which collapsed every
+// client into the single bucket "ipv4"/"ipv6", breaking per-IP limits and the
+// whitelist. This strips the transport prefix and the trailing port instead.
+inline std::string extract_ip_from_peer(const std::string &peer)
+{
+    std::string ip = peer;
+
+    if (ip.rfind("ipv4:", 0) == 0 || ip.rfind("ipv6:", 0) == 0)
+    {
+        ip = ip.substr(5);
+    }
+    else if (ip.rfind("unix:", 0) == 0)
+    {
+        return ip; // unix sockets have no ip:port structure
+    }
+
+    // Strip the trailing ":port". For bracketed IPv6 ("[::1]:52034") the port
+    // separator is the colon after ']'; the colons inside the brackets stay.
+    size_t bracket = ip.find(']');
+    size_t last_colon = ip.rfind(':');
+    if (last_colon != std::string::npos && (bracket == std::string::npos || last_colon > bracket))
+    {
+        ip = ip.substr(0, last_colon);
+    }
+
+    return ip;
+}
+
 // --- Rate Limiter Config ---
 struct RateLimiterConfig
 {
@@ -96,6 +126,21 @@ public:
         {
             tokens -= 1.0;
         }
+    }
+
+    // --- Atomically consume a token for a request. Unlike canProceed/finalize,
+    // every call costs a token, so refill rate/capacity directly bound the
+    // request rate (used by public API endpoints where every request has a cost).
+    bool tryConsume()
+    {
+        std::lock_guard<std::mutex> lock(mtx);
+        refill();
+        if (tokens >= 1.0)
+        {
+            tokens -= 1.0;
+            return true;
+        }
+        return false;
     }
 
 private:
@@ -197,6 +242,25 @@ public:
         auto profile = getOrCreate(ip);
         return profile->bucket->canProceed(); // No isBad needed
     }
+    // --- Per-request limiting: every (non-whitelisted) request consumes a token.
+    // Returns false when the caller has exhausted their budget and should be
+    // rejected. Use this for public API endpoints; the canProceed/processUpdate
+    // pair only charges for BAD requests and is meant for the txn ingress paths.
+    bool consumeToken(const std::string &ip)
+    {
+        if (isWhitelisted(ip)) return true;
+
+        auto profile = getOrCreate(ip);
+        profile->lastSeen = steady_clock::now();
+
+        if (++requestCount % cleanupInterval == 0)
+        {
+            cleanupInactiveIPs();
+        }
+
+        return profile->bucket->tryConsume();
+    }
+
     // --- Step 2: Finalize and Update State
     void processUpdate(const std::string &ip, bool isBad)
     {

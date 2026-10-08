@@ -1,67 +1,13 @@
 #include "db_base.h"
+#include "database_inventory.h"
 #include <rocksdb/write_batch.h>
 #include "hex_conversion.h"
 
-void open_dbs()
+bool open_dbs()
 {
-    db_headers::open_db();
-    db_blocks::open_db();
-    db_contract_supply::open_db();
-    db_contracts::open_db();
-    db_hash_index::open_db();
-    db_transactions::open_db();
-    db_validators::open_db();
-    db_wallets::open_db();
-    db_wallets_temp::open_db();
-    db_smart_contracts::open_db();
-    db_restricted_wallets::open_db();
-    db_block_txns::open_db();
-    db_contract_items::open_db();
-    db_validator_lookup::open_db();
-    db_validator_unbond::open_db();
-    db_proposal_ledger::open_db();
-    db_proposals::open_db();
-    db_status_fee::open_db();
-    db_process_ledger::open_db();
-    db_process_adaptive_ledger::open_db();
-    db_expense_ratio::open_db();
-    db_proposal_wallets::open_db();
-    db_proposals_temp::open_db();
-    db_delegate_vote::open_db();
-    db_delegate_recipient::open_db();
-    db_timed_txns::open_db();
-    db_quash_lookup::open_db();
-    db_quash_ledger::open_db();
-    db_wallet_lookup::open_db();
-    db_delegate_wallets::open_db();
-    db_fast_quorum::open_db();
-    db_duplicate_txn::open_db();
-    db_delegatees::open_db();
-    db_voted_proposals::open_db();
-    db_wallet_nonce::open_db();
-    db_processed_txns::open_db();
-    db_processed_wallets::open_db();
-    db_preprocessed_nonce::open_db();
-    db_validate_txns::open_db();
-    db_sc_transactions::open_db();
-    db_gov_txn::open_db();
-    db_contract_price::open_db();
-    db_attestation::open_db();
-    db_confirmed_blocks::open_db();
-    db_attestation_ledger::open_db();
-    db_validator_archive::open_db();
-    db_quash_ledger_lookup::open_db();
-    db_system::open_db();
-    db_gossip::open_db();
-    db_sc_temp::open_db();
-    db_allowance::open_db();
-    db_sc_subscriber::open_db();
-    db_event_management::open_db();
-    db_staked_coins_voted_temp::open_db();
-    db_staked_coins_voted::open_db();
-    db_fee_tokens::open_db();
-    db_fee_tokens_temp::open_db();
-    db_smart_contract_states::open_db();
+#define OPEN_DATABASE(DB) if (DB::open_db() != 1) { close_dbs(); return false; }
+    ZERA_DATABASES(OPEN_DATABASE)
+#undef OPEN_DATABASE
 
     std::string confirmed_height;
     if (!db_confirmed_blocks::get_single(CONFIRMED_BLOCK_LATEST, confirmed_height))
@@ -95,7 +41,8 @@ void open_dbs()
         batch.Put(keys.at(x), values.at(x));
         x++;
     }
-    db_preprocessed_nonce::store_batch(batch);
+    if (!db_preprocessed_nonce::store_batch(batch)) { close_dbs(); return false; }
+    return true;
 }
 
 void close_dbs()

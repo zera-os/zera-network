@@ -109,6 +109,18 @@ namespace
 
                 if (db_headers_tag::get_last_data(block_manager.new_header, block_manager.new_key) && block_manager.new_header.block_height() > block_manager.last_header.block_height())
                 {
+                    zera_validator::Block *block = new zera_validator::Block();
+                    std::string block_data;
+                    db_blocks::get_single(block_manager.new_key, block_data);
+                    block->ParseFromString(block_data);
+                    block->mutable_block_header()->CopyFrom(block_manager.new_header);
+
+                    // Enqueue both tasks into the same thread pool
+                    ValidatorThreadPool::enqueueTask([block]()
+                                                     { 
+                        ValidatorNetworkClient::StartGossip(block);
+                        delete block; });
+
                     block_manager.last_header.CopyFrom(block_manager.new_header);
                     block_manager.last_key = block_manager.new_key;
                     break;
@@ -256,8 +268,8 @@ void block_process::start_block_process()
     block_manager.last_heartbeat = 0;
     block_manager.same_block = true;
     block_manager.wallet_adr = wallets::generate_wallet_single(ValidatorConfig::get_public_key());
-    
-    //Shutdown triggered.
+
+    // Shutdown triggered.
     while (!ValidatorConfig::get_shutdown())
     {
         if (block_manager.last_heartbeat >= 450)
@@ -281,7 +293,7 @@ void block_process::start_block_process()
 
         logging::print("Waiting for txn to create block.");
 
-        while (block_manager.same_block)
+        while (block_manager.same_block && !ValidatorConfig::get_shutdown())
         {
 
             if (block_manager.proposal_timer >= 5)
@@ -319,4 +331,6 @@ void block_process::start_block_process()
 
         block_manager.last_heartbeat++;
     }
+
+    logging::print("Block process shutdown initiated", true);
 }

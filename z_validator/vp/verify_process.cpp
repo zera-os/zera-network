@@ -1,5 +1,7 @@
 #include "verify_process_txn.h"
 
+#include <set>
+
 template ZeraStatus verify_txns::verify_txn<zera_txn::MintTXN>(const zera_txn::MintTXN *txn);
 template ZeraStatus verify_txns::verify_txn<zera_txn::ItemizedMintTXN>(const zera_txn::ItemizedMintTXN *txn);
 template ZeraStatus verify_txns::verify_txn<zera_txn::InstrumentContract>(const zera_txn::InstrumentContract *txn);
@@ -186,8 +188,12 @@ ZeraStatus verify_txns::verify_identity(TXType *txn)
             return ZeraStatus(ZeraStatus::Code::SIGNATURE_ERROR, "verify_process.h: verify_identity: signature verification failed.");
         }
         zera_txn::BaseTXN *base = txn_copy.mutable_base();
-        std::string *original_hash_str = base->release_hash();
-        std::vector<uint8_t> original_hash(original_hash_str->begin(), original_hash_str->end());
+        // Copy + clear instead of release_hash(): release returns nullptr when the
+        // field is unset, and a txn submitted without a hash would crash on the
+        // dereference (segfaults are not catchable by the try/catch below).
+        std::string original_hash_str = base->hash();
+        base->clear_hash();
+        std::vector<uint8_t> original_hash(original_hash_str.begin(), original_hash_str.end());
         std::vector<uint8_t> new_hash = Hashing::sha256_hash(txn_copy.SerializeAsString());
 
         // if hashes do not match, txn cannot be made
@@ -218,8 +224,10 @@ ZeraStatus verify_txns::verify_identity<zera_txn::SmartContractExecuteTXN>(zera_
             return ZeraStatus(ZeraStatus::Code::SIGNATURE_ERROR, "verify_process.h: verify_identity: signature verification failed.");
         }
         zera_txn::BaseTXN *base = txn_copy.mutable_base();
-        std::string *original_hash_str = base->release_hash();
-        std::vector<uint8_t> original_hash(original_hash_str->begin(), original_hash_str->end());
+        // Copy + clear instead of release_hash() (see generic verify_identity above).
+        std::string original_hash_str = base->hash();
+        base->clear_hash();
+        std::vector<uint8_t> original_hash(original_hash_str.begin(), original_hash_str.end());
         std::vector<uint8_t> new_hash = Hashing::sha256_hash(txn_copy.SerializeAsString());
 
         // if hashes do not match, txn cannot be made
@@ -250,12 +258,14 @@ ZeraStatus verify_txns::verify_identity<zera_txn::ValidatorRegistration>(zera_tx
             return ZeraStatus(ZeraStatus::Code::SIGNATURE_ERROR, "verify_process.h: verify_identity: signature verification failed. Validator Registration");
         }
         zera_txn::BaseTXN *base = txn_copy.mutable_base();
-        std::string *original_hash_str = base->release_hash();
-        std::vector<uint8_t> original_hash(original_hash_str->begin(), original_hash_str->end());
+        // Copy + clear instead of release_hash() (see generic verify_identity above).
+        std::string original_hash_str = base->hash();
+        base->clear_hash();
+        std::vector<uint8_t> original_hash(original_hash_str.begin(), original_hash_str.end());
 
         if (txn_copy.register_())
         {
-            txn_copy.release_generated_signature();
+            txn_copy.clear_generated_signature();
         }
 
         std::vector<uint8_t> new_hash = Hashing::sha256_hash(txn_copy.SerializeAsString());
@@ -272,4 +282,67 @@ ZeraStatus verify_txns::verify_identity<zera_txn::ValidatorRegistration>(zera_tx
     {
         return ZeraStatus(ZeraStatus::Code::SIGNATURE_ERROR, "verify_process.h: verify_identity: crash - signature verification failed. Validator Registration CRASH");
     }
+}
+
+ZeraStatus verify_txns::verify_block_txns(const zera_validator::Block &block)
+{
+    const zera_txn::TXNS &txns = block.transactions();
+    std::set<std::string> seen_hashes;
+
+    // Verifies every txn in a repeated field. Skips internally-generated txns
+    // (smart contract / governance child txns) which carry no user signature and
+    // are reproduced during block reconstruction, and rejects duplicate hashes.
+    auto verify_field = [&seen_hashes](const auto &repeated_field) -> ZeraStatus
+    {
+        for (const auto &txn : repeated_field)
+        {
+            if (txn.base().public_key().has_smart_contract_auth() ||
+                txn.base().public_key().has_governance_auth())
+            {
+                continue;
+            }
+
+            if (!seen_hashes.insert(txn.base().hash()).second)
+            {
+                return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, "verify_process.cpp: verify_block_txns: duplicate txn hash in block");
+            }
+
+            auto txn_copy = txn;
+            ZeraStatus status = verify_identity(&txn_copy);
+
+            if (!status.ok())
+            {
+                status.prepend_message("verify_process.cpp: verify_block_txns");
+                return status;
+            }
+        }
+
+        return ZeraStatus(ZeraStatus::Code::OK);
+    };
+
+    ZeraStatus status;
+
+    if (!(status = verify_field(txns.coin_txns())).ok()) return status;
+    if (!(status = verify_field(txns.contract_txns())).ok()) return status;
+    if (!(status = verify_field(txns.mint_txns())).ok()) return status;
+    if (!(status = verify_field(txns.item_mint_txns())).ok()) return status;
+    if (!(status = verify_field(txns.governance_votes())).ok()) return status;
+    if (!(status = verify_field(txns.governance_proposals())).ok()) return status;
+    if (!(status = verify_field(txns.smart_contracts())).ok()) return status;
+    if (!(status = verify_field(txns.smart_contract_executes())).ok()) return status;
+    if (!(status = verify_field(txns.smart_contract_instantiate_txns())).ok()) return status;
+    if (!(status = verify_field(txns.expense_ratios())).ok()) return status;
+    if (!(status = verify_field(txns.nft_txns())).ok()) return status;
+    if (!(status = verify_field(txns.contract_update_txns())).ok()) return status;
+    if (!(status = verify_field(txns.validator_registration_txns())).ok()) return status;
+    if (!(status = verify_field(txns.validator_heartbeat_txns())).ok()) return status;
+    if (!(status = verify_field(txns.delegated_voting_txns())).ok()) return status;
+    if (!(status = verify_field(txns.quash_txns())).ok()) return status;
+    if (!(status = verify_field(txns.fast_quorum_txns())).ok()) return status;
+    if (!(status = verify_field(txns.revoke_txns())).ok()) return status;
+    if (!(status = verify_field(txns.compliance_txns())).ok()) return status;
+    if (!(status = verify_field(txns.burn_sbt_txns())).ok()) return status;
+    if (!(status = verify_field(txns.allowance_txns())).ok()) return status;
+
+    return ZeraStatus(ZeraStatus::Code::OK);
 }

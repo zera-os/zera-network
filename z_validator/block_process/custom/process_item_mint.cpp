@@ -23,6 +23,7 @@ namespace
         {
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_item_mint.cpp: mint_process: This mint would cause circulation to go over max supply.");
         }
+        
         uint256_t circulation(supply.circulation());
         uint256_t max_supply(supply.max_supply());
         uint256_t one = 1;
@@ -145,36 +146,50 @@ ZeraStatus block_process::process_txn<zera_txn::ItemizedMintTXN>(const zera_txn:
     }
 
     uint256_t byte_multiplier(get_txn_fee(zera_txn::TRANSACTION_TYPE::ITEM_MINT_TYPE));
-    // calculate the fees that need to be paid, and verify they have authorized enough coin to pay it
-    uint256_t txn_fee_amount;
-    status = zera_fees::calculate_fees(usd_equiv, byte_multiplier, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, fee_contract.coin_denomination().amount(), txn->base().public_key(), fee_contract.contract_id());
+    zera_txn::InstrumentContract contract;
 
-    if (!status.ok())
+    if (sc_txn)
     {
-        return status;
-    }
-    
-    //CHANGELOG: added sc_fee address for sc_txns
-    std::string sender_adr;
-    if(sc_txn)
-    {
-        sender_adr = sc_fee_address;
+        // Internal smart contract txn: the network fee is metered as gas drawn from
+        // the contract's approved budget instead of being charged in currency. It
+        // gets settled (or refunded on crash) with the root smart contract txn's gas.
+        uint256_t usd_fee = byte_multiplier * txn->ByteSize();
+        usd_fee += get_key_fee(txn->base().public_key());
+
+        if (!consume_sc_txn_fee_gas(usd_fee))
+        {
+            // Also mark the status fee record, since unpack_process_wrapper
+            // overwrites the ZeraStatus txn_status with status_fees.status().
+            status_fees.set_status(zera_txn::TXN_STATUS::OUT_OF_GAS);
+            return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_item_mint.cpp: insufficient gas for internal txn network fee", zera_txn::TXN_STATUS::OUT_OF_GAS);
+        }
+
+        status_fees.set_base_contract_id(txn->base().fee_id());
+        status_fees.set_base_fees("0");
     }
     else
     {
-        sender_adr = wallets::generate_wallet(txn->base().public_key());
+        // calculate the fees that need to be paid, and verify they have authorized enough coin to pay it
+        uint256_t txn_fee_amount;
+        status = zera_fees::calculate_fees(usd_equiv, byte_multiplier, txn->ByteSize(), txn->base().fee_amount(), txn_fee_amount, fee_contract.coin_denomination().amount(), txn->base().public_key(), fee_contract.contract_id());
+
+        if (!status.ok())
+        {
+            return status;
+        }
+
+        std::string sender_adr = wallets::generate_wallet(txn->base().public_key());
+
+        status = zera_fees::process_fees(contract, txn_fee_amount, sender_adr, fee_id, true, status_fees, txn->base().hash(), fee_address);
+
+        if (!status.ok())
+        {
+            return status;
+        }
+
+        status_fees.set_base_contract_id(txn->base().fee_id());
+        status_fees.set_base_fees(boost::lexical_cast<std::string>(txn_fee_amount));
     }
-
-    zera_txn::InstrumentContract contract;
-    status = zera_fees::process_fees(contract, txn_fee_amount, sender_adr, fee_id, true, status_fees, txn->base().hash(), fee_address);
-
-    if (!status.ok())
-    {
-        return status;
-    }
-
-    status_fees.set_base_contract_id(txn->base().fee_id());
-    status_fees.set_base_fees(boost::lexical_cast<std::string>(txn_fee_amount));
 
     status = item_mint(txn, contract, timed, status_fees);
 

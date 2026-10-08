@@ -83,28 +83,12 @@ private:
     
     static bool check_rate_limit(grpc::ServerContext *context)
     {
-        // Get the client's IP address
-        std::string peer_info = context->peer();
-        std::string client_ip;
+        std::string client_ip = extract_ip_from_peer(context->peer());
 
-        // Extract the IP address from the peer info
-        size_t pos = peer_info.find(":");
-        if (pos != std::string::npos)
-        {
-            client_ip = peer_info.substr(0, pos); // Extract everything before the first colon
-        }
-        else
-        {
-            client_ip = peer_info; // Fallback if no colon is found
-        }
-
-        if (!rate_limiter.canProceed(client_ip))
-        {
-            return false;
-        }
-
-        rate_limiter.processUpdate(client_ip, false);
-
-        return true;
+        // Every API request consumes a token, so the configured static
+        // rate/capacity (5/sec, burst 100 per IP) is actually enforced. The old
+        // canProceed + processUpdate(ip, false) pair never consumed tokens, which
+        // made this limiter a no-op.
+        return rate_limiter.consumeToken(client_ip);
     };
 };

@@ -16,6 +16,7 @@
 #include "utils.h"
 #include "wallet.pb.h"
 #include "nf_helpers.h"
+#include "wallets.h"
 
 WasmEdge_Result WalletAddress(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
                               const WasmEdge_Value *In, WasmEdge_Value *Out)
@@ -435,6 +436,84 @@ WasmEdge_Result CalledSmartContractWallet(void *Data, const WasmEdge_CallingFram
 
   const char *val = wallet.c_str();
   const size_t len = wallet.length();
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
+}
+
+WasmEdge_Result CurrentSmartContract(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                                     const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+  /*
+   * Params: {i32}
+   * Returns: {i32}
+   *
+   * Writes the current smart contract's "name_instance" string to WASM memory
+   * at TargetPointer and returns its length. The client is responsible for
+   * splitting on the final '_' to recover name and instance.
+   */
+
+  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[0]);
+
+  WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+
+  SenderDataType *sender = (SenderDataType *)Data;
+
+  const std::string &name_instance = sender->current_smart_contract_instance_name;
+
+  const char *val = name_instance.c_str();
+  const size_t len = name_instance.length();
+  WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
+  Out[0] = WasmEdge_ValueGenI32(len);
+
+  return WasmEdge_Result_Success;
+}
+
+WasmEdge_Result ContractWallet(void *Data, const WasmEdge_CallingFrameContext *CallFrameCxt,
+                               const WasmEdge_Value *In, WasmEdge_Value *Out)
+{
+  /*
+   * Params: {i32, i32, i32}
+   * Returns: {i32}
+   *
+   * Given a smart contract's "name_instance" string, deterministically derives
+   * the contract's wallet address and writes the base58-encoded result to
+   * WASM memory at TargetPointer. Returns the length of the encoded wallet.
+   * Returns 0 if the wallet could not be derived.
+   */
+
+  uint32_t NameInstancePointer = WasmEdge_ValueGetI32(In[0]);
+  uint32_t NameInstanceSize = WasmEdge_ValueGetI32(In[1]);
+  uint32_t TargetPointer = WasmEdge_ValueGetI32(In[2]);
+
+  WasmEdge_MemoryInstanceContext *MemCxt = WasmEdge_CallingFrameGetMemoryInstance(CallFrameCxt, 0);
+
+  std::string name_instance;
+  if (!read_wasm_param(MemCxt, NameInstancePointer, NameInstanceSize, name_instance))
+  {
+    return WasmEdge_Result_Terminate;
+  }
+
+  logging::print("[ContractWallet] Name Instance", name_instance, true);
+
+  zera_txn::PublicKey pub_key;
+  pub_key.set_smart_contract_auth("sc_" + name_instance);
+
+  std::string wallet_raw = wallets::generate_wallet(pub_key);
+
+  if (wallet_raw.empty())
+  {
+    Out[0] = WasmEdge_ValueGenI32(0);
+    return WasmEdge_Result_Success;
+  }
+
+  
+  std::string wallet_b58 = base58_encode(wallet_raw);
+
+  logging::print("[ContractWallet] Wallet", wallet_b58, true);
+  const char *val = wallet_b58.c_str();
+  const size_t len = wallet_b58.length();
   WasmEdge_MemoryInstanceSetData(MemCxt, (unsigned char *)val, TargetPointer, len);
   Out[0] = WasmEdge_ValueGenI32(len);
 

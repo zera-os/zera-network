@@ -14,6 +14,7 @@
 #include "../logging/logging.h"
 #include "base64.h"
 #include "sc_base64.h"
+#include "fee_payer.h"
 
 
 bool zera_fees::get_cur_equiv_validator(const std::string &contract_id, uint256_t &cur_equiv)
@@ -530,7 +531,8 @@ ZeraStatus zera_fees::process_interface_fees(const zera_txn::BaseTXN &base, zera
     uint256_t fee_amount = boost::lexical_cast<uint256_t>(interface_amount);
     std::string txn_hash = base.hash();
 
-    auto sender_wallet = wallets::generate_wallet(base.public_key());
+    // When a third-party fee payer is present, the sponsor covers the interface fee too.
+    auto sender_wallet = fee_payer::source_wallet(base);
 
     ZeraStatus status = balance_tracker::subtract_txn_balance(sender_wallet, contract_id, fee_amount, txn_hash);
 

@@ -143,9 +143,7 @@ void get_validator_registration(zera_txn::Validator *self, zera_txn::ValidatorRe
     validator->CopyFrom(*self);
 
     logging::print("Validator created - nonce:", std::to_string(nonce), true);
-    //set the base
-    uint256_t validator_registration_fee = get_fee("VALIDATOR_REGISTRATION_TXN_FEE");
-    registration_request->mutable_base()->set_fee_amount(validator_registration_fee.str());
+    registration_request->mutable_base()->set_fee_amount("25000000000");
     registration_request->mutable_base()->set_fee_id(ZERA_SYMBOL);
     registration_request->mutable_base()->mutable_public_key()->set_single(ValidatorConfig::get_public_key());
 

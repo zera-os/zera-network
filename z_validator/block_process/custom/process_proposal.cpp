@@ -165,8 +165,11 @@ namespace
         txn_copy.CopyFrom(txn);
 
         // check the hash of the txn is correct
-        auto hash_vec = txn_copy.mutable_base()->release_hash();
-        std::vector<uint8_t> hash(hash_vec->begin(), hash_vec->end());
+        // Copy + clear instead of release_hash(): release leaks the returned string
+        // and returns nullptr when the field is unset (crash on dereference).
+        std::string hash_value = txn_copy.base().hash();
+        txn_copy.mutable_base()->clear_hash();
+        std::vector<uint8_t> hash(hash_value.begin(), hash_value.end());
 
         auto man_hash = Hashing::sha256_hash(txn_copy.SerializeAsString());
 
@@ -501,15 +504,12 @@ namespace
         {
             return ZeraStatus(ZeraStatus::Code::TXN_FAILED, "process_proposal.cpp: check_txn: GovernanceProposal cannot have both governance_txn and options.", zera_txn::TXN_STATUS::INVALID_PARAMETERS);
         }
-
         if (txn->governance_option_txns_size() > 0 && txn->options_size() > 0)
         {
             return check_option_txns(txn);
         }
-
         if (txn->governance_txn_size() > 0)
         {
-
             ZeraStatus status;
             auto gov_txns = txn->governance_txn();
 
@@ -526,8 +526,9 @@ namespace
                 }
             }
 
-            return ZeraStatus();
         }
+
+        return ZeraStatus();
     }
 
     ZeraStatus calculate_fee(const zera_txn::InstrumentContract &contract, const zera_txn::GovernanceProposal *txn, uint256_t &fee_amount)
@@ -712,7 +713,6 @@ ZeraStatus block_process::process_txn<zera_txn::GovernanceProposal>(const zera_t
     {
         return ZeraStatus(ZeraStatus::Code::BLOCK_FAULTY_TXN, status.read_status());
     }
-
     status = check_parameters_prop(txn, contract, timed, status_fees);
     status_fees.set_status(status.txn_status());
 

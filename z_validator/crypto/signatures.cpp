@@ -4,6 +4,8 @@
 #include <iostream>
 #include <regex>
 #include <sstream>
+#include <map>
+#include <set>
 
 // Third-party library headers
 #include <sodium.h>
@@ -24,6 +26,7 @@
 #include "validators.h"
 #include "../logging/logging.h"
 #include "zera_api.pb.h"
+#include "fee_payer.h"
 
 namespace
 {
@@ -72,20 +75,38 @@ namespace
         std::vector<uint8_t> pub_key_extract;
         KeyType key_type = extract_public_key(key_pair.public_key, pub_key_extract);
         std::vector<uint8_t> private_key = key_pair.private_key;
-        std::vector<uint8_t> signature; // Create a vector to hold the signature
+        std::vector<uint8_t> signature;
 
-        if (key_type == KeyType::ED25519) // If the key type is Ed25519
+        if (key_type == KeyType::ED25519)
         {
-            // Use the sodium crypto_sign_detached function to sign the message
-            signature = std::vector<uint8_t>(crypto_sign_BYTES); // Allocate space for the signature
-            if (crypto_sign_detached(signature.data(), nullptr, message.data(), message.size(), private_key.data()) != 0)
+            std::vector<uint8_t> signing_key;
+
+            if (private_key.size() == crypto_sign_SEEDBYTES)
             {
-                // If the signature generation fails, throw an error
-                std::string sig_str(signature.begin(), signature.end());
-                return sig_str;
+                // 32-byte seed: derive the full 64-byte secret key
+                std::vector<uint8_t> derived_pk(crypto_sign_PUBLICKEYBYTES);
+                signing_key.resize(crypto_sign_SECRETKEYBYTES);
+                if (crypto_sign_seed_keypair(derived_pk.data(), signing_key.data(), private_key.data()) != 0)
+                {
+                    throw std::runtime_error("Failed to derive keypair from seed");
+                }
+            }
+            else if (private_key.size() == crypto_sign_SECRETKEYBYTES)
+            {
+                // 64-byte combined key: use directly
+                signing_key = private_key;
+            }
+            else
+            {
+                throw std::runtime_error("Invalid Ed25519 private key size: expected 32 or 64 bytes");
+            }
+
+            signature = std::vector<uint8_t>(crypto_sign_BYTES);
+            if (crypto_sign_detached(signature.data(), nullptr, message.data(), message.size(), signing_key.data()) != 0)
+            {
+                throw std::runtime_error("Failed to sign message");
             }
             std::string sig_str(signature.begin(), signature.end());
-            // Return the signature
             return sig_str;
         }
         else if (key_type == KeyType::ERROR_TYPE) // If the key type is not recognized or is not Ed448
@@ -217,10 +238,17 @@ namespace
             return false;
         }
 
-        base->release_hash();
+        base->clear_hash();
+        // The user signs WITHOUT their own fee_payer field present (the sponsor signs
+        // afterward, over the user signature). Clearing an absent field is a no-op.
+        base->clear_fee_payer();
 
         int x = multi_key->signatures_size() - 1;
-        std::map<std::string, std::vector<std::string>> class_keys;
+        std::map<std::string, std::set<std::string>> class_keys;
+        // Track every signer key already counted so a single key repeated across
+        // multiple signer slots (same or different class) cannot satisfy a threshold
+        // that is meant to require multiple independent signers.
+        std::set<std::string> counted_keys;
 
         while (x >= 0)
         {
@@ -261,8 +289,13 @@ namespace
 
                 if (signatures::verify_multi(public_key, *signature, message_str))
                 {
-
-                    class_keys[prefix].push_back(public_key);
+                    // Only count each unique signer once. A duplicate key (already
+                    // counted in any class) is ignored so it cannot inflate the
+                    // approval count toward the threshold.
+                    if (counted_keys.insert(public_key).second)
+                    {
+                        class_keys[prefix].insert(public_key);
+                    }
                 }
             }
             x--;
@@ -305,6 +338,62 @@ namespace
             }
         }
         return valid;
+    }
+
+    // Verify the third-party fee payer (sponsor) signature.
+    //
+    // The sponsor signs the entire user-signed txn with base.hash and
+    // base.fee_payer.signature cleared (the user's signature and the sponsor's
+    // public key + nonce stay present). This binds the sponsor to the exact user
+    // txn, the user's signature, and the sponsor's own nonce.
+    //
+    // v1 constraints: the sponsor must be a plain single user key (no
+    // smart_contract_auth / governance_auth, no multi), and may not be the sender.
+    template <typename TXType>
+    bool verify_fee_payer(TXType &tx)
+    {
+        const zera_txn::FeePayer &fp = tx.base().fee_payer();
+
+        if (fp.public_key().has_smart_contract_auth() || fp.public_key().has_governance_auth())
+        {
+            logging::print("verify_fee_payer: sponsor key may not use smart_contract_auth or governance_auth");
+            return false;
+        }
+
+        if (fp.public_key().multi().public_keys_size() > 0 || fp.public_key().multi().signatures_size() > 0)
+        {
+            logging::print("verify_fee_payer: multi-key sponsor is not supported in v1");
+            return false;
+        }
+
+        if (fp.signature().empty() || fp.public_key().single().empty())
+        {
+            logging::print("verify_fee_payer: missing sponsor signature or public key");
+            return false;
+        }
+
+        // Reject self-sponsorship: a sponsor that is the sender is pointless and
+        // would double-bump the same wallet's nonce.
+        if (wallets::get_public_key_string(fp.public_key()) == wallets::get_public_key_string(tx.base().public_key()))
+        {
+            logging::print("verify_fee_payer: self-sponsorship is not allowed");
+            return false;
+        }
+
+        TXType tx_copy;
+        tx_copy.CopyFrom(tx);
+        zera_txn::BaseTXN *base = tx_copy.mutable_base();
+        base->clear_hash();
+        base->mutable_fee_payer()->clear_signature();
+
+        std::string message_str = tx_copy.SerializeAsString();
+        std::string pub_key_str = wallets::get_public_key_string(fp.public_key());
+
+        std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
+        std::vector<uint8_t> signature(fp.signature().begin(), fp.signature().end());
+        std::vector<uint8_t> message(message_str.begin(), message_str.end());
+
+        return verify_signature(message, signature, public_key);
     }
 }
 
@@ -368,8 +457,10 @@ void signatures::sign_block_proposer(zera_validator::Block *block, KeyPair key_p
 }
 void signatures::sign_block_broadcast(zera_validator::Block *block, KeyPair key_pair)
 {
-    block->release_public_key();
-    block->release_signature();
+    // clear_* instead of release_*: release transfers ownership of the heap string
+    // to the caller, and discarding the pointer leaks it. Wire bytes are identical.
+    block->clear_public_key();
+    block->clear_signature();
     block->mutable_public_key()->set_single(ValidatorConfig::get_gen_public_key());
     std::string message_str = block->SerializeAsString();
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
@@ -430,6 +521,22 @@ template void signatures::sign_txns<zera_txn::ValidatorHeartbeat>(zera_txn::Vali
 template void signatures::sign_txns<zera_txn::ProposalResult>(zera_txn::ProposalResult *, KeyPair);
 template void signatures::sign_txns<zera_txn::SmartContractTXN>(zera_txn::SmartContractTXN *, KeyPair);
 
+template <typename TXType>
+void signatures::sign_fee_payer(TXType *txn, KeyPair key_pair)
+{
+    // Sponsor signs the user-signed txn with base.hash and fee_payer.signature absent,
+    // but the user's signature and the sponsor's public key + nonce present.
+    zera_txn::BaseTXN *base = txn->mutable_base();
+    base->clear_hash();
+    base->mutable_fee_payer()->clear_signature();
+
+    std::string message_str = txn->SerializeAsString();
+    std::vector<uint8_t> message(message_str.begin(), message_str.end());
+    std::string signature = sign_message(message, key_pair);
+    base->mutable_fee_payer()->set_signature(signature);
+}
+template void signatures::sign_fee_payer<zera_txn::GovernanceVote>(zera_txn::GovernanceVote *, KeyPair);
+
 // ##################################################
 //                   VERIFYING
 // ##################################################
@@ -453,10 +560,29 @@ bool signatures::verify_txns(TXType &tx)
 {
     try
     {
+        // Third-party fee payer: only allowed on allowlisted txn types (v1: GovernanceVote).
+        // When present, verify the sponsor signature over the user-signed txn first.
+        if (tx.base().has_fee_payer())
+        {
+            if (!fee_payer::type_allowed<TXType>())
+            {
+                logging::print("verify_txns: fee_payer not permitted for this txn type");
+                return false;
+            }
+            if (!verify_fee_payer(tx))
+            {
+                return false;
+            }
+        }
+
         TXType tx_copy;
         tx_copy.CopyFrom(tx);
         zera_txn::BaseTXN *base = tx_copy.mutable_base();
-        base->release_hash();
+        base->clear_hash();
+        // The user signed WITHOUT the fee_payer field (the sponsor signs afterward,
+        // over the user's signature). Clearing an absent field is a no-op, so this is
+        // byte-for-byte identical to the legacy path when there is no fee payer.
+        base->clear_fee_payer();
 
         if (tx.base().public_key().multi().signatures_size() > 0)
         {
@@ -478,11 +604,15 @@ bool signatures::verify_txns(TXType &tx)
         std::string encoded_pub = base58_encode_public_key(public_key_str);
 
         std::vector<uint8_t> public_key(public_key_str.begin(), public_key_str.end());
-        std::string *signature_str = base->release_signature();
+
+        // Copy + clear instead of release_signature(): release returns nullptr when
+        // the field is unset (remote-triggerable crash) and leaks the string when set.
+        std::string signature_value = base->signature();
+        base->clear_signature();
 
         std::string message_str = tx_copy.SerializeAsString();
 
-        std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+        std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
         std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
         return verify_signature(message, signature, public_key);
@@ -520,27 +650,41 @@ bool signatures::verify_txns<zera_txn::ValidatorRegistration>(zera_txn::Validato
 {
     try
     {
+        // A fee payer is not allowed on this txn type in v1.
+        if (tx.base().has_fee_payer())
+        {
+            logging::print("Validator Registration: fee_payer not permitted");
+            return false;
+        }
+
         zera_txn::ValidatorRegistration tx_copy;
         tx_copy.CopyFrom(tx);
         zera_txn::BaseTXN *base = tx_copy.mutable_base();
-        std::string *hash = base->release_hash();
+
+        // Copy values + clear fields instead of release_*(): release returns nullptr
+        // for unset fields (remote-triggerable crash on dereference) and leaks the
+        // heap string otherwise. Serialization output is identical.
+        std::string hash = base->hash();
+        base->clear_hash();
 
         if (tx.base().public_key().multi().signatures_size() > 0 || !base->has_signature())
         {
             logging::print("Validator Registration 1");
             return false;
         }
-        std::string *gen_sig = tx_copy.release_generated_signature();
+        std::string gen_sig = tx_copy.generated_signature();
+        tx_copy.clear_generated_signature();
 
         std::string public_key_str = wallets::get_public_key_string(base->public_key());
 
         std::vector<uint8_t> public_key(public_key_str.begin(), public_key_str.end());
 
-        std::string *signature_str = base->release_signature();
+        std::string signature_value = base->signature();
+        base->clear_signature();
 
         std::string message_str = tx_copy.SerializeAsString();
 
-        std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+        std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
         std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
         if (verify_signature(message, signature, public_key))
@@ -556,8 +700,8 @@ bool signatures::verify_txns<zera_txn::ValidatorRegistration>(zera_txn::Validato
 
                 std::string pub_key_gen_str = wallets::get_public_key_string(tx_copy.generated_public_key());
                 std::vector<uint8_t> gen_public_key(pub_key_gen_str.begin(), pub_key_gen_str.end());
-                std::vector<uint8_t> gen_signature(gen_sig->begin(), gen_sig->end());
-                std::vector<uint8_t> gen_message(hash->begin(), hash->end());
+                std::vector<uint8_t> gen_signature(gen_sig.begin(), gen_sig.end());
+                std::vector<uint8_t> gen_message(hash.begin(), hash.end());
 
                 bool passed = verify_signature(gen_message, gen_signature, gen_public_key);
                 if (passed)
@@ -591,11 +735,17 @@ bool signatures::verify_txns<zera_txn::CoinTXN>(zera_txn::CoinTXN &tx)
 {
     try
     {
+        // A fee payer is not allowed on CoinTXN in v1 (separate multi-input fee path).
+        if (tx.base().has_fee_payer())
+        {
+            logging::print("CoinTXN: fee_payer not permitted");
+            return false;
+        }
 
         zera_txn::CoinTXN tx_copy;
         tx_copy.CopyFrom(tx);
         zera_txn::BaseTXN *base = tx_copy.mutable_base();
-        base->release_hash();
+        base->clear_hash();
 
         if (tx_copy.auth().public_key_size() != tx_copy.auth().signature_size() || tx_copy.auth().public_key_size() != tx_copy.auth().nonce_size())
         {
@@ -671,9 +821,13 @@ bool signatures::verify_request(TXType &txn)
         TXType copy;
         copy.CopyFrom(txn);
 
-        std::string *signature_str = copy.release_signature();
+        // Copy + clear instead of release_signature(): release returns nullptr when
+        // the field is unset, and a null dereference is a segfault the surrounding
+        // try/catch cannot catch. An empty signature simply fails verification below.
+        std::string signature_value = copy.signature();
+        copy.clear_signature();
         std::string message_str = copy.SerializeAsString();
-        std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+        std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
         std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
         return verify_signature(message, signature, public_key);
@@ -695,9 +849,10 @@ ZeraStatus signatures::verify_block_batch(zera_validator::BlockBatch &block_batc
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
     zera_validator::BlockBatch batch_copy;
     batch_copy.CopyFrom(block_batch);
-    std::string *signature_str = batch_copy.release_signature();
+    std::string signature_value = batch_copy.signature();
+    batch_copy.clear_signature();
     std::string message_str = batch_copy.SerializeAsString();
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     if (!verify_signature(message, signature, public_key))
@@ -727,10 +882,11 @@ ZeraStatus signatures::verify_block_validator(zera_validator::Block &block)
     zera_validator::Block block_copy;
     block_copy.CopyFrom(block);
 
-    std::string *signature_str = block_copy.release_signature();
+    std::string signature_value = block_copy.signature();
+    block_copy.clear_signature();
     std::string message_str = block_copy.SerializeAsString();
 
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
     std::string pub_key_str = wallets::get_public_key_string(block.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
@@ -753,12 +909,13 @@ ZeraStatus signatures::verify_block(zera_validator::Block &block)
     std::vector<uint8_t> public_key(public_key_string.begin(), public_key_string.end());
     zera_validator::Block block_copy;
     block_copy.CopyFrom(block);
-    block_copy.mutable_block_header()->release_hash();
+    block_copy.mutable_block_header()->clear_hash();
 
-    std::string *signature_str = block_copy.mutable_block_header()->release_signature();
+    std::string signature_value = block_copy.block_header().signature();
+    block_copy.mutable_block_header()->clear_signature();
     std::string message_str = block_copy.SerializeAsString();
 
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     if (!verify_signature(message, signature, public_key))
@@ -773,9 +930,12 @@ bool signatures::verify_activity_request(zera_api::ActivityRequest request)
 {
     std::string pub_key_str = wallets::get_public_key_string(request.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
-    std::string *signature_str = request.release_signature();
+    // Copy + clear instead of release_signature(): a request that omits the
+    // signature would make release return nullptr and crash the API service.
+    std::string signature_value = request.signature();
+    request.clear_signature();
     std::string message_str = request.SerializeAsString();
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     return verify_signature(message, signature, public_key);
@@ -824,9 +984,13 @@ bool signatures::verify_txn_gossip(zera_validator::TXNGossip *txn)
 {
     std::string public_key_str = wallets::get_public_key_string(txn->public_key());
     std::vector<uint8_t> public_key(public_key_str.begin(), public_key_str.end());
-    std::string *signature_str = txn->release_signature();
+    // Copy + clear instead of release_signature(): a gossip message that omits the
+    // signature would make release return nullptr and crash the validator. The
+    // signature is intentionally left cleared on *txn, matching the old behavior.
+    std::string signature_value = txn->signature();
+    txn->clear_signature();
     std::string message_str = txn->SerializeAsString();
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     if (!verify_signature(message, signature, public_key))
@@ -845,7 +1009,7 @@ void signatures::sign_smart_contract_event(zera_api::SmartContractEventsResponse
     event->set_signature(signature);
 }
 
-bool signatures::verify_message(const std::string& message, const std::string& signature, const std::string& public_key)
+bool signatures::verify_message(const std::string &message, const std::string &signature, const std::string &public_key)
 {
     auto public_key_vec = base58_decode_public_key(public_key);
     auto signature_vec = base58_decode(signature);
@@ -869,31 +1033,67 @@ void signatures::sign_response(zera_api::SmartContractEventsSearchResponse *resp
     response->set_signature(signature);
 }
 
-bool signatures::verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest& request)
+bool signatures::verify_checkpoint_info_request(const zera_validator::CheckpointInfoRequest &request)
 {
     zera_validator::CheckpointInfoRequest request_copy;
     request_copy.CopyFrom(request);
 
     std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
-    std::string* signature_str = request_copy.release_signature();
+    // Copy + clear instead of release_signature(): a request that omits the
+    // signature would make release return nullptr and crash on dereference.
+    std::string signature_value = request_copy.signature();
+    request_copy.clear_signature();
     std::string message_str = request_copy.SerializeAsString();
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     return verify_signature(message, signature, public_key);
 }
 
-bool signatures::verify_checkpoint_request(const zera_validator::CheckpointRequest& request)
+bool signatures::verify_checkpoint_request(const zera_validator::CheckpointRequest &request)
 {
     zera_validator::CheckpointRequest request_copy;
     request_copy.CopyFrom(request);
 
     std::string pub_key_str = wallets::get_public_key_string(request_copy.public_key());
     std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
-    std::string* signature_str = request_copy.release_signature();
+    // Copy + clear instead of release_signature(): a request that omits the
+    // signature would make release return nullptr and crash on dereference.
+    std::string signature_value = request_copy.signature();
+    request_copy.clear_signature();
     std::string message_str = request_copy.SerializeAsString();
-    std::vector<uint8_t> signature(signature_str->begin(), signature_str->end());
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
+    std::vector<uint8_t> message(message_str.begin(), message_str.end());
+
+    return verify_signature(message, signature, public_key);
+}
+
+void signatures::sign_checkpoint_info(zera_validator::CheckpointInfo *info, KeyPair key_pair)
+{
+    info->clear_signature();
+    std::string message_str = info->SerializeAsString();
+    std::vector<uint8_t> message(message_str.begin(), message_str.end());
+    std::string signature = sign_message(message, key_pair);
+    info->set_signature(signature);
+}
+
+bool signatures::verify_checkpoint_info(const zera_validator::CheckpointInfo &info)
+{
+    if (info.signature().empty())
+    {
+        return false;
+    }
+
+    zera_validator::CheckpointInfo info_copy;
+    info_copy.CopyFrom(info);
+
+    std::string pub_key_str = wallets::get_public_key_string(info_copy.public_key());
+    std::vector<uint8_t> public_key(pub_key_str.begin(), pub_key_str.end());
+    std::string signature_value = info_copy.signature();
+    info_copy.clear_signature();
+    std::string message_str = info_copy.SerializeAsString();
+    std::vector<uint8_t> signature(signature_value.begin(), signature_value.end());
     std::vector<uint8_t> message(message_str.begin(), message_str.end());
 
     return verify_signature(message, signature, public_key);

@@ -14,6 +14,7 @@ std::string ValidatorConfig::fee_address_string_;
 std::vector<std::string> ValidatorConfig::seed_validators_;
 std::vector<std::string> ValidatorConfig::staked_contract_ids_;
 std::vector<std::string> ValidatorConfig::white_list_;
+std::string ValidatorConfig::checkpoint_key_;
 uint32_t ValidatorConfig::version_;
 uint32_t ValidatorConfig::required_version_;
 KeyPair ValidatorConfig::key_pair_;
@@ -27,6 +28,7 @@ BlockWork ValidatorConfig::block_work_;
 bool ValidatorConfig::dev_mode_ = false; // by default dev mode is set to true
 bool ValidatorConfig::shutdown_ = false;
 bool ValidatorConfig::local_mode_ = false;
+bool ValidatorConfig::protonet_ = false;
 
 void ValidatorConfig::generate_keys()
 {
@@ -158,6 +160,18 @@ void ValidatorConfig::set_configs(const std::string &line)
 
 			ValidatorConfig::set_dev_mode(dev);
 		}
+		else if (key == "protonet")
+		{
+			bool protonet = false;
+			std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+
+			if (value == "true" || value == "yes")
+			{
+				protonet = true;
+			}
+
+			ValidatorConfig::set_protonet(protonet);
+		}
 		else if (key == "register")
 		{
 			std::transform(value.begin(), value.end(), value.begin(), ::tolower);
@@ -182,6 +196,10 @@ void ValidatorConfig::set_configs(const std::string &line)
 		else if (key == "whitelist")
 		{
 			ValidatorConfig::set_whitelist(value);
+		}
+		else if (key == "checkpoint_key")
+		{
+			ValidatorConfig::set_checkpoint_key(value);
 		}
 	}
 }
@@ -218,8 +236,12 @@ void ValidatorConfig::copy_and_process_config_file(std::ifstream &srcFile, std::
 
 void ValidatorConfig::set_config()
 {
-	std::ifstream volume_config(VALIDATOR_CONFIG);
-	set_version(VERSION);
+	load_file_config();
+	load_chain_config();
+}
+
+void ValidatorConfig::load_chain_config()
+{
 	std::string temp_treasury_wallet;
 
 	if (!db_system::get_single(TREASURY_KEY, temp_treasury_wallet))
@@ -248,7 +270,12 @@ void ValidatorConfig::set_config()
 	}
 
 	set_required_version(required_version);
+}
 
+void ValidatorConfig::load_file_config()
+{
+	std::ifstream volume_config(VALIDATOR_CONFIG);
+	set_version(VERSION);
 	if (volume_config.is_open())
 	{
 		process_config_file(volume_config);
@@ -269,6 +296,7 @@ void ValidatorConfig::set_shutdown(bool shutdown)
 
 bool ValidatorConfig::get_shutdown()
 {
+	std::lock_guard<std::mutex> lock(mutex_);
 	return shutdown_;
 }
 void ValidatorConfig::set_fee_address()
@@ -308,6 +336,16 @@ void ValidatorConfig::set_local_mode(bool local_mode)
 {
 	std::lock_guard<std::mutex> lock(mutex_);
 	local_mode_ = local_mode;
+}
+
+bool ValidatorConfig::get_protonet()
+{
+	return protonet_;
+}
+void ValidatorConfig::set_protonet(bool protonet)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	protonet_ = protonet;
 }
 
 uint32_t ValidatorConfig::get_required_version()
@@ -419,6 +457,21 @@ void ValidatorConfig::set_whitelist(const std::string &whitelist)
 	{
 		white_list_.push_back(whitelist);
 	}
+}
+void ValidatorConfig::set_checkpoint_key(const std::string &checkpoint_key)
+{
+	std::lock_guard<std::mutex> lock(mutex_);
+	if (checkpoint_key != "")
+	{
+		// Stored as raw key bytes (same representation as public keys coming off
+		// the wire) so it can be compared directly against CheckpointInfo.public_key.
+		std::vector<uint8_t> decoded = base58_decode_public_key(checkpoint_key);
+		checkpoint_key_ = std::string(decoded.begin(), decoded.end());
+	}
+}
+std::string ValidatorConfig::get_checkpoint_key()
+{
+	return checkpoint_key_;
 }
 void ValidatorConfig::set_block_height(const std::string &block_height)
 {

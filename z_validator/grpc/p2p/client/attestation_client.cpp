@@ -287,8 +287,7 @@ void ValidatorNetworkClient::CheckAttestations(std::shared_ptr<zera_validator::B
             }
             logging::print("ATTEMPTING REORG");
             Reorg::reorg_blockchain();
-            
-            ValidatorAPIClient::ClearPendingEventsForBlock(request->block_height());
+            return; // Recovery is scheduled; do not mutate event state or resume sync.
         }
         else
         {

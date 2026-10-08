@@ -73,19 +73,7 @@ private:
     grpc::Status RecieveRequest(grpc::ServerContext *context, const TXType *request, google::protobuf::Empty *response)
     {
         // Get the client's IP address
-        std::string peer_info = context->peer();
-        std::string client_ip;
-
-        // Extract the IP address from the peer info
-        size_t pos = peer_info.find(":");
-        if (pos != std::string::npos)
-        {
-            client_ip = peer_info.substr(0, pos); // Extract everything before the first colon
-        }
-        else
-        {
-            client_ip = peer_info; // Fallback if no colon is found
-        }
+        std::string client_ip = extract_ip_from_peer(context->peer());
 
         if(!rate_limiter.canProceed(client_ip))
         {
