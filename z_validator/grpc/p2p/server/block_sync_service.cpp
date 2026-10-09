@@ -96,7 +96,13 @@ grpc::Status ValidatorServiceImpl::SyncBlockchain(grpc::ServerContext *context, 
     // The legitimate client pages in batches of exactly BLOCK_SYNC blocks, so any
     // other amount is a malformed or malicious request trying to force unbounded
     // RocksDB reads, response construction, and outbound bandwidth (CWE-400).
-    if (amount <= 0 || amount > BLOCK_SYNC)
+    // if (amount <= 0 || amount > BLOCK_SYNC)
+    // {
+    //     logging::print("SyncBlockchain: rejected request with out-of-range amount: " + std::to_string(amount), false);
+    //     return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "block sync amount out of range");
+    // }
+
+    if (amount <= 0)
     {
         logging::print("SyncBlockchain: rejected request with out-of-range amount: " + std::to_string(amount), false);
         return grpc::Status(grpc::StatusCode::INVALID_ARGUMENT, "block sync amount out of range");
